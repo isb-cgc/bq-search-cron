@@ -1,0 +1,150 @@
+version: 2.1
+commands:
+  deployment_setup:
+    steps:
+      - run:
+          name: "Set the Tier"
+          command: |
+            TIER=DEV
+            if [[ ${CIRCLE_BRANCH} =~ bq-search-cron-(prod|uat|test).* ]]; then
+              TIER=$(awk -F- '{print toupper($4)}' \<<< ${CIRCLE_BRANCH})
+            fi
+            echo "export TIER=${TIER}" >> $BASH_ENV
+            echo "Tier was identified as ${TIER} for branch ${CIRCLE_BRANCH}"
+      - run:
+          name: "Assign Project-level vars"
+          command: |
+            if [ ! -f deployment.key.json ]; then
+              echo "Deployment JSON keyfile not found - loading from CircleCI."
+              KEY=${DEPLOYMENT_KEY_BQ_SEARCH_DEV}
+            else
+              echo "Deployment JSON keyfile found."
+              KEY="NA"
+            fi
+            CLIENT_EMAIL=${DEPLOYMENT_CLIENT_EMAIL_BQ_SEARCH_DEV}
+            PROJECT_ID=${DEPLOYMENT_PROJECT_ID_BQ_SEARCH_DEV}
+            BUCKET=${DEPLOYMENT_BUCKET_ISB_BQ_SEARCH_DEV}
+            if [[ ${TIER} == "PROD" ]]; then
+              KEY=${DEPLOYMENT_KEY_BQ_SEARCH_PROD}
+              CLIENT_EMAIL=${DEPLOYMENT_CLIENT_EMAIL_BQ_SEARCH_PROD}
+              PROJECT_ID=${DEPLOYMENT_PROJECT_ID_BQ_SEARCH_PROD}
+              BUCKET=${DEPLOYMENT_BUCKET_ISB_BQ_SEARCH_PROD}
+              echo "Using PROD project and related deployment SA and bucket."
+            elif [[ ${TIER} == "TEST" ]]; then
+              KEY=${DEPLOYMENT_KEY_BQ_SEARCH_TEST}
+              CLIENT_EMAIL=${DEPLOYMENT_CLIENT_EMAIL_BQ_SEARCH_TEST}
+              PROJECT_ID=${DEPLOYMENT_PROJECT_ID_BQ_SEARCH_TEST}
+              BUCKET=${DEPLOYMENT_BUCKET_ISB_BQ_SEARCH_TEST}
+              echo "Using TEST project and related deployment SA and bucket."
+            elif [[ ${TIER} == "UAT" ]]; then
+              KEY=${DEPLOYMENT_KEY_BQ_SEARCH_UAT}
+              CLIENT_EMAIL=${DEPLOYMENT_CLIENT_EMAIL_BQ_SEARCH_UAT}
+              PROJECT_ID=${DEPLOYMENT_PROJECT_ID_BQ_SEARCH_UAT}
+              BUCKET=${DEPLOYMENT_BUCKET_ISB_BQ_SEARCH_UAT}
+              echo "Using UAT project and related deployment SA and bucket."
+            elif [[ ${TIER} == "DEV" ]]; then
+              echo "Using development/default project and related deployment SA."
+            else
+              echo "[ERROR] - Unrecognized tier: ${TIER} - exiting."
+              exit 1
+            fi
+            echo "export DEPLOYMENT_TIER=${TIER}" >> $BASH_ENV
+            echo "export DEPLOYMENT_KEY=\"${KEY}\"" >> $BASH_ENV
+            echo "export DEPLOYMENT_CLIENT_EMAIL=${CLIENT_EMAIL}" >> $BASH_ENV
+            echo "export DEPLOYMENT_PROJECT_ID=${PROJECT_ID}" >> $BASH_ENV
+            echo "export DEPLOYMENT_BUCKET=${BUCKET}" >> $BASH_ENV
+            
+            echo "Project settings assigned:"
+            echo "Deployment client: ${CLIENT_EMAIL}"
+            echo "Deployment project: ${PROJECT_ID}"
+  auth:
+    steps:
+      - run:
+          name: "Service Account Auth and Project Settings"
+          command: |
+            sudo -E /bin/bash ./shell/gcloud_authenticate.sh
+  deployment_config:
+    steps:
+      - run:
+          name: "Set tier-specific configuration file"
+          command: |
+            sudo -E /bin/bash ./shell/pull_config.sh
+            xargs -a bq_search_cron_deployment_config.txt -I{} echo "export {}" >> $BASH_ENV
+            
+
+  install_cloud_sdk:
+    steps:
+      - run:
+          name: "Install CloudSDK"
+          command: |
+            echo "export CLOUDSDK_CORE_DISABLE_PROMPTS=1" >> $BASH_ENV
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+            curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+            sudo apt-get update -qq
+            sudo apt-get -y install google-cloud-sdk
+
+jobs:
+  build_job:
+    environment:
+      TZ: "/usr/share/zoneinfo/America/Los_Angeles"
+    working_directory: ~/bq-search-cron
+    docker:
+      - image: cimg/python:3.12
+
+    steps:
+      - checkout
+      - run:
+          name: Fix for bug with Git and Ubuntu 20+
+          command: |
+            SHA=$(git rev-list -1 HEAD)
+            echo "export APP_SHA=${SHA:0:7}" >> $BASH_ENV
+      - run:
+          name: Set Python Path
+          command: |
+            echo "export PYTHONPATH=/home/circleci/${CIRCLE_PROJECT_REPONAME}:/home/circleci/${CIRCLE_PROJECT_REPONAME}/lib" >> $BASH_ENV
+      - restore_cache:
+          keys:
+            - bq-search-cron-lib-{{ checksum "./cl_functions/src/requirements.txt" }}
+      - install_cloud_sdk
+      - deployment_setup
+      - auth
+      - deployment_config
+      - save_cache:
+          key: bq-search-cron-{{ .Branch }}-{{ .Revision }}-{{ epoch }}
+          paths:
+            - ./cl_functions
+            - ./shell
+            - ./.git
+
+  deploy_job:
+    environment:
+      TZ: "/usr/share/zoneinfo/America/Los_Angeles"
+    working_directory: ~/bq-search-cron
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - restore_cache:
+          keys:
+            - bq-search-cron-{{ .Branch }}-{{ .Revision }}-
+      - install_cloud_sdk
+      - deployment_setup
+      - auth
+      - deployment_config
+      - deploy:
+          command: |
+            sudo -E /bin/bash ./shell/deployments.sh
+workflows:
+  version: 2
+  build_and_deploy:
+    jobs:
+      - build_job
+      - deploy_job:
+          requires:
+            - build_job
+          filters:
+            branches:
+              only:
+                - main
+                - bq-search-cron-test
+                - bq-search-cron-uat
+                - bq-search-cron-prod

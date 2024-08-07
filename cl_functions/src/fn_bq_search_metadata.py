@@ -8,7 +8,7 @@ BQ_GCS_PROJECT = getenv("BQ_GCS_PROJECT", "isb-cgc")
 STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'webapp-static-files-isb-cgc-dev')
 METADATA_FILE_PATH = getenv("METADATA_FILE_PATH", 'bq_ecosys/bq_meta_data.json')
 FILTERS_FILE_PATH = getenv("FILTERS_FILE_PATH", 'bq_ecosys/bq_meta_filters.json')
-JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "False") == "True")
+JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "True") == "True")
 JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.csv")
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
 
@@ -60,14 +60,15 @@ def run_bq_metadata_etl(request):
             print(f'[INFO] FILTERS FILE updated ...')
 
         # joins examples update
-        joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
-        joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
-        if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
-            print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
-            joins_list = update_example_joins_json(joins_csv_blob)
-            joins_json_string = json.dumps(joins_list)
-            bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-            print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
+        if JOIN_CSV_TO_JSON:
+            joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
+            joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
+            if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
+                print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+                joins_list = update_example_joins_json(joins_csv_blob)
+                joins_json_string = json.dumps(joins_list)
+                bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
+                print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
 
     except Exception as e:
         print(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")

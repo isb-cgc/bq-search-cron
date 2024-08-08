@@ -12,7 +12,7 @@ JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "True") == "True")
 JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.csv")
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
 
-BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc|isb-cgc-bq")
+BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc/isb-cgc-bq")
 BQ_ECO_SCAN_LABELS_ONLY = bool(getenv("BQ_ECO_SCAN_LABELS_ONLY", "False") == "True")
 BQ_HANDLE_VIEWS = bool(getenv("BQ_HANDLE_VIEWS", "False") == "True")
 
@@ -224,7 +224,7 @@ def update_example_joins_json(joins_csv_blob):
 
 
 def check_for_update(last_updated):
-    project_name_list = BQ_PROJECT_NAMES.split()
+    project_name_list = BQ_PROJECT_NAMES.split('/')
     update_needed = False
     try:
         for project_name in project_name_list:

@@ -124,7 +124,7 @@ if [ "${DO_DEPLOYER_SA_IAM_POLICY_BINDING}" == "TRUE" ]; then
     for sa in "${SAS_LIST[@]}"
     do
       gcloud iam service-accounts add-iam-policy-binding ${sa} --member serviceAccount:${DEPLOYER_SA} \
-        --role roles/iam.serviceAccounts.actAs --project ${DEPLOYMENT_PROJECT_ID}
+        --role roles/iam.serviceAccountUser --project ${DEPLOYMENT_PROJECT_ID}
     done
 fi
 

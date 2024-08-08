@@ -35,10 +35,10 @@ LOCATION=us-west1
 
 
 ## TEST
-DEPLOYMENT_PROJECT_ID=isb-cgc-test
-CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-test.iam.gserviceaccount.com
-CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc-test.iam.gserviceaccount.com
-DEPLOYER_SA=deployer-test@isb-cgc-test.iam.gserviceaccount.com
+#DEPLOYMENT_PROJECT_ID=isb-cgc-test
+#CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-test.iam.gserviceaccount.com
+#CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc-test.iam.gserviceaccount.com
+#DEPLOYER_SA=deployer-test@isb-cgc-test.iam.gserviceaccount.com
 
 
 # UAT
@@ -48,10 +48,10 @@ DEPLOYER_SA=deployer-test@isb-cgc-test.iam.gserviceaccount.com
 #DEPLOYER_SA=deployer-uat@isb-cgc-uat.iam.gserviceaccount.com
 
 ## PROD
-#DEPLOYMENT_PROJECT_ID=isb-cgc
-#CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
-#CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc.iam.gserviceaccount.com
-#DEPLOYER_SA=deployer@isb-cgc.iam.gserviceaccount.com
+DEPLOYMENT_PROJECT_ID=isb-cgc
+CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
+CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc.iam.gserviceaccount.com
+DEPLOYER_SA=deployer@isb-cgc.iam.gserviceaccount.com
 
 
 

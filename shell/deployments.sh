@@ -53,6 +53,7 @@ function setup_schedule {
       --message-body '{"purpose": "scheduled check"}' \
       --oidc-service-account-email ${BQ_SEARCH_CLOUD_SCHEDULER_SA} \
       --project ${DEPLOYMENT_PROJECT_ID} \
+      --attempt-deadline 1200s \
       --description "A daily cron job to keep BQ Search current."
 }
 

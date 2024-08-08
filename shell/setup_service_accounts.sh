@@ -18,7 +18,7 @@
 DO_SETUP_APIS=FALSE
 DO_SERVICE_ACCOUNT=FALSE
 DO_SERVICE_ACCOUNT_AS_INVOKER=FALSE
-DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR=TRUE
+DO_SERVICE_ACCOUNT_AS_OBJ_USER=TRUE
 DO_DEPLOYER_SA_IAM_POLICY_BINDING=FALSE
 # FOR POST DEPLOYMENT SCRIPT
 DO_BIND_FUNCTION_SA_TO_FUNCTION=FALSE
@@ -119,12 +119,12 @@ if [ "${DO_SERVICE_ACCOUNT_AS_INVOKER}" == "TRUE" ]; then
 fi
 
 
-if [ "${DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR}" == "TRUE" ]; then
+if [ "${DO_SERVICE_ACCOUNT_AS_OBJ_USER}" == "TRUE" ]; then
     # grant the function runtime SA with the role, storage object creator role
-    echo "------------------ DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR --------------------"
+    echo "------------------ DO_SERVICE_ACCOUNT_AS_OBJ_USER --------------------"
     gcloud projects add-iam-policy-binding ${DEPLOYMENT_PROJECT_ID} \
         --member serviceAccount:${CLOUD_FUNCTION_SA} \
-        --role roles/storage.objectCreator --project ${DEPLOYMENT_PROJECT_ID}
+        --role roles/storage.objectUser --project ${DEPLOYMENT_PROJECT_ID}
 fi
 
 

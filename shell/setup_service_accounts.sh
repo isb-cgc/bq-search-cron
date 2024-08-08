@@ -21,7 +21,7 @@ DO_SERVICE_ACCOUNT_AS_INVOKER=FALSE
 DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR=TRUE
 DO_DEPLOYER_SA_IAM_POLICY_BINDING=FALSE
 # FOR POST DEPLOYMENT SCRIPT
-DO_BIND_FUNCTION_SA_TO_FUNCTION=TRUE
+DO_BIND_FUNCTION_SA_TO_FUNCTION=FALSE
 
 FUNCTION_SERVICE_NAME=bq-search-etl
 LOCATION=us-west1
@@ -121,8 +121,9 @@ fi
 
 if [ "${DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR}" == "TRUE" ]; then
     # grant the function runtime SA with the role, storage object creator role
+    echo "------------------ DO_SERVICE_ACCOUNT_AS_OBJ_CREATOR --------------------"
     gcloud projects add-iam-policy-binding ${DEPLOYMENT_PROJECT_ID} \
-        --member serviceAccount:${CTB_CLOUD_FUNCTION_SA} \
+        --member serviceAccount:${CLOUD_FUNCTION_SA} \
         --role roles/storage.objectCreator --project ${DEPLOYMENT_PROJECT_ID}
 fi
 

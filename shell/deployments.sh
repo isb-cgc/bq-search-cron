@@ -23,7 +23,6 @@ ENTRY_POINT=run_bq_metadata_etl
 LOCATION=us-west1
 TIMEZONE=America/Los_Angeles
 SCHEDULE="55 23 * * *"
-FUNCTION_TIMEOUT=1200
 
 if [ "${DO_FUNCTION_DEPLOY}" == "TRUE" ]; then
     echo "------------------FUNCTION_DEPLOY--------------------"

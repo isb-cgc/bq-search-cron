@@ -78,7 +78,7 @@ def run_bq_metadata_etl(request):
 
 def build_bqmetadata():
     bq_table_metadata_dict = {}
-    project_name_list = BQ_PROJECT_NAMES.split(',')
+    project_name_list = BQ_PROJECT_NAMES.split('/')
     try:
         for project_name in project_name_list:
             print(f'[INFO] Scanning from project [{project_name}] ...')

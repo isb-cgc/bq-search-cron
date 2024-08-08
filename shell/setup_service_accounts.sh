@@ -15,10 +15,10 @@
 # limitations under the License.
 #
 
-DO_SETUP_APIS=TRUE
-DO_SERVICE_ACCOUNT=TRUE
-DO_SERVICE_ACCOUNT_AS_INVOKER=TRUE
-
+DO_SETUP_APIS=FALSE
+DO_SERVICE_ACCOUNT=FALSE
+DO_SERVICE_ACCOUNT_AS_INVOKER=FALSE
+DO_DEPLOYER_SA_IAM_POLICY_BINDING=TRUE
 # FOR POST DEPLOYMENT SCRIPT
 DO_BIND_FUNCTION_SA_TO_FUNCTION=FALSE
 
@@ -27,28 +27,30 @@ LOCATION=us-west1
 
 # DEV
 DEPLOYMENT_PROJECT_ID=isb-cgc-dev-1
-BQ_SEARCH_CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-dev-1.iam.gserviceaccount.com
-BQ_SEARCH_CLOUD_SCHEDULER_SA=bq-search-cloud-scheduler@isb-cgc-dev-1.iam.gserviceaccount.com
-
+CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-dev-1.iam.gserviceaccount.com
+CLOUD_SCHEDULER_SA=bq-search-cloud-scheduler@isb-cgc-dev-1.iam.gserviceaccount.com
+DEPLOYER_SA=deployer@isb-cgc-dev-1.iam.gserviceaccount.com
 
 
 
 ## TEST
 #DEPLOYMENT_PROJECT_ID=isb-cgc-test
-#BQ_SEARCH_CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-test.iam.gserviceaccount.com
-#BQ_SEARCH_CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc-test.iam.gserviceaccount.com
+#CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc-test.iam.gserviceaccount.com
+#CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc-test.iam.gserviceaccount.com
+#DEPLOYER_SA=deployer-test@isb-cgc-test.iam.gserviceaccount.com
 
 
 # UAT
 #DEPLOYMENT_PROJECT_ID=isb-cgc-uat
-#BQ_SEARCH_CLOUD_FUNCTION_SA=bq-search-dev-cloud-function-sa@isb-cgc-uat.iam.gserviceaccount.com
-#BQ_SEARCH_CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc-uat.iam.gserviceaccount.com
-
+#CLOUD_FUNCTION_SA=bq-search-dev-cloud-function-sa@isb-cgc-uat.iam.gserviceaccount.com
+#CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc-uat.iam.gserviceaccount.com
+#DEPLOYER_SA=deployer-uat@isb-cgc-uat.iam.gserviceaccount.com
 
 ## PROD
 #DEPLOYMENT_PROJECT_ID=isb-cgc
-#BQ_SEARCH_CLOUD_FUNCTION_SA=bq-search-dev-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
-#BQ_SEARCH_CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc.iam.gserviceaccount.com
+#CLOUD_FUNCTION_SA=bq-search-dev-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
+#CLOUD_SCHEDULER_SA=bq-search-dev-scheduler@isb-cgc.iam.gserviceaccount.com
+#DEPLOYER_SA=deployer@isb-cgc.iam.gserviceaccount.com
 
 
 
@@ -80,7 +82,7 @@ fi
 
 if [ "${DO_SERVICE_ACCOUNT}" == "TRUE" ]; then
     echo "------------------ DO_SERVICE_ACCOUNT --------------------"
-    GOOGLE_SA_LIST=(${BQ_SEARCH_CLOUD_FUNCTION_SA} ${BQ_SEARCH_CLOUD_SCHEDULER_SA})
+    GOOGLE_SA_LIST=(${CLOUD_FUNCTION_SA} ${CLOUD_SCHEDULER_SA})
     for sa_item in "${GOOGLE_SA_LIST[@]}"
     do
       SA_EXISTS=`gcloud iam service-accounts list --project=${DEPLOYMENT_PROJECT_ID} | grep ${sa_item}`
@@ -111,11 +113,20 @@ if [ "${DO_SERVICE_ACCOUNT_AS_INVOKER}" == "TRUE" ]; then
     echo "------------------ DO_SERVICE_ACCOUNT_AS_INVOKER --------------------"
     # grant the scheduler SA with cloud run invoker roles
     gcloud projects add-iam-policy-binding ${DEPLOYMENT_PROJECT_ID} \
-        --member serviceAccount:${BQ_SEARCH_CLOUD_SCHEDULER_SA} \
+        --member serviceAccount:${CLOUD_SCHEDULER_SA} \
         --role roles/run.invoker --project ${DEPLOYMENT_PROJECT_ID}
 fi
 
 
+if [ "${DO_DEPLOYER_SA_IAM_POLICY_BINDING}" == "TRUE" ]; then
+    echo "------------------ DO_DEPLOYER_SA_IAM_POLICY_BINDING --------------------"
+    SAS_LIST=(${CLOUD_SCHEDULER_SA} ${CLOUD_FUNCTION_SA})
+    for sa in "${SAS_LIST[@]}"
+    do
+      gcloud iam service-accounts add-iam-policy-binding ${sa} --member serviceAccount:${DEPLOYER_SA} \
+        --role roles/iam.serviceAccountUser --project ${DEPLOYMENT_PROJECT_ID}
+    done
+fi
 
 # POST DEPLOYMENT SCRIPTS
 # bind the function service to the scheduler SA
@@ -123,7 +134,7 @@ if [ "${DO_BIND_FUNCTION_SA_TO_FUNCTION}" == "TRUE" ]; then
     echo "------------------ DO_BIND_FUNCTION_SA_TO_FUNCTION --------------------"
     gcloud functions add-invoker-policy-binding ${FUNCTION_SERVICE_NAME} \
           --region=${LOCATION} \
-          --member=serviceAccount:${BQ_SEARCH_CLOUD_SCHEDULER_SA} --project ${DEPLOYMENT_PROJECT_ID}
+          --member=serviceAccount:${CLOUD_SCHEDULER_SA} --project ${DEPLOYMENT_PROJECT_ID}
 fi
 
 

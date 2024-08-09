@@ -42,7 +42,7 @@ def run_bq_metadata_etl(request):
         new_tables_data = []
         if metadata_blob is None or check_for_update(metadata_blob.time_created):
             print(f'[INFO] METADATA FILE is outdated ...')
-            new_tables_data_dict = build_bqmetadata()
+            new_tables_data_dict = build_bq_metadata()
             new_tables_data = list(new_tables_data_dict.values())
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
@@ -75,12 +75,12 @@ def run_bq_metadata_etl(request):
     return {"code": 200, "message": f"Function <run_bq_metadata_etl> ran successfully."}
 
 
-def build_bqmetadata():
+def build_bq_metadata():
     bq_table_metadata_dict = {}
     project_name_list = BQ_PROJECT_NAMES.split('/')
     try:
         for project_name in project_name_list:
-            print(f'[INFO] Scanning from project [{project_name}] ...')
+            print(f'[INFO] Building BQ Metadata: Scanning from project [{project_name}] ...')
             client = bigquery.Client(project=project_name)
             dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
             read_public_only = getenv('{}_READ_ALL'.format(project_name.replace('-', '_').upper()), 'False') == 'False'
@@ -122,7 +122,7 @@ def build_bqmetadata():
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
     except Exception as e:
-        print(f"[ERROR] Error has occurred while running build_bqmetadata(): {e}")
+        print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
     return bq_table_metadata_dict
 
 
@@ -229,7 +229,7 @@ def check_for_update(last_updated):
         for project_name in project_name_list:
             if update_needed:
                 break
-            print(f'[INFO] Scanning from project <{project_name}> ...')
+            print(f'[INFO] Checking for updates from project <{project_name}> ...')
             client = bigquery.Client(project=project_name)
 
             # dataset_list = client.list_datasets()
@@ -239,7 +239,7 @@ def check_for_update(last_updated):
             for dataset in dataset_list:
                 if update_needed:
                     break
-                print(f'[INFO] Scanning from === dataset <{dataset.dataset_id}> ...')
+                # print(f'[INFO] Scanning from === dataset <{dataset.dataset_id}> ...')
                 read_this_dataset = False
                 if dataset.dataset_id.startswith('bq_log') or dataset.dataset_id.startswith('bq_metrics'):
                     continue

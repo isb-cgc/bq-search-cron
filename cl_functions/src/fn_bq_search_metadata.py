@@ -86,7 +86,7 @@ def build_bq_metadata():
             print(f'[INFO] Building BQ Metadata: Scanning from project [{project_name}] ...')
             client = bigquery.Client(project=project_name)
             dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
-            read_public_only = getenv('{}_READ_ALL'.format(project_name.replace('-', '_').upper()), 'False') == 'False'
+            read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 read_this_dataset = False
                 if dataset.dataset_id.startswith('bq_log') or dataset.dataset_id.startswith('bq_metrics'):

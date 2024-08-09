@@ -71,11 +71,13 @@ def run_bq_metadata_etl(request):
                 joins_json_string = json.dumps(joins_list)
                 bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
                 print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
-
+        print('[INFO] Function <run_bq_metadata_etl> ran successfully.')
     except Exception as e:
         print(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
         return {"code": 500, "message": f"Function <run_bq_metadata_etl> failed to run: {e}"}
-    return {"code": 200, "message": f"Function <run_bq_metadata_etl> ran successfully."}
+    message = "Function <run_bq_metadata_etl> ran successfully."
+    print(f'[INFO] {message}')
+    return {"code": 200, "message": message}
 
 
 def build_bq_metadata():

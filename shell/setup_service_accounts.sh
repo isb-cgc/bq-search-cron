@@ -17,9 +17,9 @@
 
 DO_SETUP_APIS=FALSE
 DO_SERVICE_ACCOUNT=FALSE
-DO_SERVICE_ACCOUNT_AS_INVOKER=TRUE
-DO_SERVICE_ACCOUNT_AS_OBJ_USER=TRUE
-DO_DEPLOYER_SA_IAM_POLICY_BINDING=TRUE
+DO_SERVICE_ACCOUNT_AS_INVOKER=FALSE
+DO_SERVICE_ACCOUNT_AS_OBJ_USER=FALSE
+DO_DEPLOYER_SA_IAM_POLICY_BINDING=FALSE
 # FOR POST DEPLOYMENT SCRIPT
 DO_BIND_FUNCTION_SA_TO_FUNCTION=FALSE
 
@@ -48,10 +48,10 @@ LOCATION=us-west1
 #DEPLOYER_SA=deployer-uat@isb-cgc-uat.iam.gserviceaccount.com
 
 ## PROD
-#DEPLOYMENT_PROJECT_ID=isb-cgc
-#CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
-#CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc.iam.gserviceaccount.com
-#DEPLOYER_SA=deployer@isb-cgc.iam.gserviceaccount.com
+DEPLOYMENT_PROJECT_ID=isb-cgc
+CLOUD_FUNCTION_SA=bq-search-cloud-function-sa@isb-cgc.iam.gserviceaccount.com
+CLOUD_SCHEDULER_SA=bq-search-scheduler@isb-cgc.iam.gserviceaccount.com
+DEPLOYER_SA=deployer@isb-cgc.iam.gserviceaccount.com
 
 
 

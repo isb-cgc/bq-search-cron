@@ -51,7 +51,10 @@ def run_bq_metadata_etl(request):
         if update_filter:
             print(f'[INFO] FILTERS FILE is outdated ...')
             if not len(new_tables_data):
-                metadata_blob.reload()
+                if metadata_blob is None:
+                    metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
+                else:
+                    metadata_blob.reload()
                 last_metadata_json_str = metadata_blob.download_as_string()
                 new_tables_data = json.loads(last_metadata_json_str)
             bq_filters = build_filters(new_tables_data)

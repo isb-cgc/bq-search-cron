@@ -4,7 +4,6 @@ from os import getenv
 import re
 import csv
 
-BQ_GCS_PROJECT = getenv("BQ_GCS_PROJECT", "isb-cgc")
 STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'webapp-static-files-isb-cgc-dev')
 METADATA_FILE_PATH = getenv("METADATA_FILE_PATH", 'bq_ecosys/bq_meta_data.json')
 FILTERS_FILE_PATH = getenv("FILTERS_FILE_PATH", 'bq_ecosys/bq_meta_filters.json')
@@ -34,7 +33,7 @@ CATEGORY_DESCS = {
 
 def run_bq_metadata_etl(request):
     try:
-        gcs = storage.Client(project=BQ_GCS_PROJECT)
+        gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)

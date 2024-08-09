@@ -46,7 +46,7 @@ function setup_schedule {
     # Change SCHEDULE_OP to update if you just want to change things after it is created:
     gcloud scheduler jobs ${SCHEDULE_OP} http ${FUNCTION_SERVICE_NAME}-trigger \
       --location ${LOCATION} \
-      --schedule "${SCHEDULE_M}" "${SCHEDULE_H}" "${SCHEDULE_D}" "${SCHEDULE_MO}" "${SCHEDULE_W}" \
+      --schedule ${SCHEDULE_M} ${SCHEDULE_H} ${SCHEDULE_D} ${SCHEDULE_MO} ${SCHEDULE_W} \
       --time-zone "${TIMEZONE}" \
       --uri ${FUNC_URL} \
       --message-body '{"purpose": "scheduled check"}' \

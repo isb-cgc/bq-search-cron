@@ -69,7 +69,9 @@ commands:
           name: "Set tier-specific configuration file"
           command: |
             sudo -E /bin/bash ./shell/pull_config.sh
-            xargs -a bq_search_cron_deployment_config.txt -I{} echo "export {}" >> $BASH_ENV
+            set -a
+            . bq_search_cron_deployment_config.txt
+            set +a
             
 
   install_cloud_sdk:

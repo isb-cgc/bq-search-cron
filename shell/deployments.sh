@@ -22,7 +22,6 @@ FUNCTION_SERVICE_NAME=bq-search-etl
 ENTRY_POINT=run_bq_metadata_etl
 LOCATION=us-west1
 TIMEZONE=America/Los_Angeles
-SCHEDULE="55 23 * * *"
 
 if [ "${DO_FUNCTION_DEPLOY}" == "TRUE" ]; then
     echo "------------------FUNCTION_DEPLOY--------------------"

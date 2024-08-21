@@ -10,10 +10,11 @@ FILTERS_FILE_PATH = getenv("FILTERS_FILE_PATH", 'bq_ecosys/bq_meta_filters.json'
 JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "True") == "True")
 JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.csv")
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
+VERSIONS_JSON_FILE_PATH = getenv("VERSIONS_JSON_FILE_PATH", "bq_ecosys/bq_versions.json")
 
 BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc/isb-cgc-bq")
 BQ_ECO_SCAN_LABELS_ONLY = bool(getenv("BQ_ECO_SCAN_LABELS_ONLY", "False") == "True")
-BQ_HANDLE_VIEWS = bool(getenv("BQ_HANDLE_VIEWS", "False") == "True")
+BQ_BUILD_VERSION_JSON = bool(getenv("BQ_BUILD_VERSION_JSON", "False") == "True")
 
 METADATA_NUM_ROWS_END_STR = "-metadata_num_rows"
 VIEW_ROW_COUNT_END_STR = "view_row_count"
@@ -21,7 +22,8 @@ METADATA_KEYS_TO_REMOVE = ['kind', 'etag', 'selfLink', 'numBytes', 'numLongTermB
                            'numTimeTravelPhysicalBytes', 'numTotalLogicalBytes', 'numActiveLogicalBytes',
                            'numLongTermLogicalBytes', 'numTotalPhysicalBytes', 'numActivePhysicalBytes',
                            'numLongTermPhysicalBytes']
-FILTERS = ['category', 'status', 'program', 'data_type', 'experimental_strategy', 'reference_genome', 'source', 'project_id']
+FILTERS = ['category', 'status', 'program', 'data_type', 'experimental_strategy', 'reference_genome', 'source',
+           'project_id']
 
 CATEGORY_DESCS = {
     "clinical_biospecimen_data": "Patient case and sample information ",
@@ -41,15 +43,19 @@ def run_bq_metadata_etl(request):
         update_filter = False or not filter_blob
         new_tables_data = []
         if metadata_blob is None or check_for_update(metadata_blob.time_created):
-            print(f'[INFO] METADATA FILE is outdated ...')
-            new_tables_data_dict = build_bq_metadata()
+            print('[INFO] METADATA FILE is outdated ...')
+            new_tables_data_dict, new_bq_versions_dict = build_bq_metadata()
             new_tables_data = list(new_tables_data_dict.values())
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
-            print(f'[INFO] METADATA FILE updated ...')
+            if BQ_BUILD_VERSION_JSON:
+                bucket.blob(VERSIONS_JSON_FILE_PATH).upload_from_string(json.dumps(new_bq_versions_dict),
+                                                                        content_type='application/json')
+                print('[INFO] VERSION FILE updated ...')
+            print('[INFO] METADATA FILE updated ...')
             update_filter = True
         if update_filter:
-            print(f'[INFO] FILTERS FILE is outdated ...')
+            print('[INFO] FILTERS FILE is outdated ...')
             if not len(new_tables_data):
                 if metadata_blob is None:
                     metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
@@ -81,6 +87,7 @@ def run_bq_metadata_etl(request):
 
 def build_bq_metadata():
     bq_table_metadata_dict = {}
+    bq_versions_dict = {}
     project_name_list = BQ_PROJECT_NAMES.split('/')
     try:
         for project_name in project_name_list:
@@ -105,29 +112,47 @@ def build_bq_metadata():
                     table_list = list(client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
                         tbl_metadata = client.get_table(tbl).to_api_repr()
-                        if BQ_HANDLE_VIEWS and 'labels' in tbl_metadata.keys():
-                            # for handling views, not tables
-                            for label in tbl_metadata['labels'].keys():
-                                if label.endswith(METADATA_NUM_ROWS_END_STR)\
-                                        or label == VIEW_ROW_COUNT_END_STR:
-                                    tbl_metadata['numRows'] = tbl_metadata['labels'][label]
-                                    del tbl_metadata['labels'][label]
-                                    break
-                            if tbl_metadata['tableReference']['projectId'].endswith('-shdw'):
-                                tbl_prj_id = tbl_metadata['tableReference']['projectId'][:-5]
-                                tbl_metadata['tableReference']['projectId'] = tbl_prj_id
-                                tbl_ds_id = tbl_metadata['tableReference']['datasetId'].replace('_views', '_tables')
-                                tbl_metadata['tableReference']['datasetId'] = tbl_ds_id
-                                tbl_tbl_id = tbl_metadata['tableReference']['tableId'].replace('_view', '')
-                                tbl_metadata['tableReference']['tableId'] = tbl_tbl_id
-                                tbl_metadata['id'] = f'{tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}'
+                        if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata.keys() and 'version' in \
+                                tbl_metadata['labels'].keys():
+                            tbl_prj_id = tbl_metadata['tableReference']['projectId']
+                            tbl_ds_id = tbl_metadata['tableReference']['datasetId']
+                            tbl_tbl_id = tbl_metadata['tableReference']['tableId']
+                            labeled_version = tbl_metadata['labels']['version']
+                            is_latest = ('status' in tbl_metadata['labels'].keys() and tbl_metadata['labels'][
+                                'status'] == 'current')
+                            if tbl_ds_id.endswith('_versioned'):
+                                root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
+                                root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'_{labeled_version}'.lower())
+                                root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'_{labeled_version}'.upper())
+
+                            elif tbl_tbl_id.endswith('_current'):
+                                root_tbl_ds_id = tbl_ds_id
+                                root_tbl_tbl_id = tbl_tbl_id.removesuffix('_current')
+                                is_latest = True
+                            version_root_id = f'{tbl_prj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
+                            version_str = labeled_version.replace('_', '.')
+
+                            if version_root_id not in bq_versions_dict.keys():
+                                bq_versions_dict[version_root_id] = {}
+                            if version_str not in bq_versions_dict[version_root_id].keys():
+                                bq_versions_dict[version_root_id][version_str] = {}
+                            if 'is_latest' not in bq_versions_dict[version_root_id][version_str].keys():
+                                bq_versions_dict[version_root_id][version_str]['is_latest'] = is_latest
+                            else:
+                                bq_versions_dict[version_root_id][version_str]['is_latest'] |= is_latest
+
+                            if 'tables' not in bq_versions_dict[version_root_id][version_str].keys():
+                                bq_versions_dict[version_root_id][version_str]['tables'] = []
+                            bq_versions_dict[version_root_id][version_str]['tables'].append(
+                                f'{tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}')
+
                         for k in METADATA_KEYS_TO_REMOVE:
                             if k in tbl_metadata.keys():
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
     except Exception as e:
         print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
-    return bq_table_metadata_dict
+    return bq_table_metadata_dict, bq_versions_dict
 
 
 def build_filters(metadata_list):
@@ -146,7 +171,8 @@ def build_filters(metadata_list):
                 if filter_key in FILTERS:
                     if filter_key == 'category' and label_value == 'file_metadata':
                         label_value = 'metadata'
-                    description = CATEGORY_DESCS[label_value] if filter_key == 'category' and CATEGORY_DESCS.get(label_value) else ""
+                    description = CATEGORY_DESCS[label_value] if filter_key == 'category' and CATEGORY_DESCS.get(
+                        label_value) else ""
                     if label_value not in filter_data[filter_key]["options"].keys():
                         filter_data[filter_key]["options"][label_value] = {
                             'label': label_value.replace("_", " ").upper(),
@@ -239,7 +265,7 @@ def check_for_update(last_updated):
             # dataset_list = client.list_datasets()
             dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
 
-            read_public_only = getenv('{}_READ_ALL'.format(project_name.replace('-', '_').upper()), 'False') == 'False'
+            read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 if update_needed:
                     break
@@ -256,14 +282,15 @@ def check_for_update(last_updated):
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
+                # print(f'read_this_dataset: {read_this_dataset}')
                 if read_this_dataset:
                     table_list = list(client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
                         t = client.get_table(tbl)
-                        # print(f'[INFO] Scanning from ====== table [{t.table_id}] ...')
                         if last_updated < t.modified:
                             update_needed = True
-                            print(f'[INFO] Need to update METADATA FILE: Table {t.table_id} was recently added/modified.')
+                            print(
+                                f'[INFO] Need to update METADATA FILE: Table {t.table_id} was recently added/modified.')
                             break
 
     except Exception as e:

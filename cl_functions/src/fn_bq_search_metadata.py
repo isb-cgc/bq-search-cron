@@ -11,6 +11,7 @@ JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "True") == "True")
 JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.csv")
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
 VERSIONS_JSON_FILE_PATH = getenv("VERSIONS_JSON_FILE_PATH", "bq_ecosys/bq_versions.json")
+MARKED_TABLE_MAP_FILE_PATH = getenv("MARKED_TABLE_MAP_FILE_PATH", 'bq_ecosys/bq_marked_tbl_map.json')
 
 BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc/isb-cgc-bq")
 BQ_ECO_SCAN_LABELS_ONLY = bool(getenv("BQ_ECO_SCAN_LABELS_ONLY", "False") == "True")
@@ -88,6 +89,11 @@ def run_bq_metadata_etl(request):
 def build_bq_metadata():
     bq_table_metadata_dict = {}
     bq_versions_dict = {}
+    gcs = storage.Client()
+    bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
+    blob = bucket.get_blob(MARKED_TABLE_MAP_FILE_PATH)
+
+    marked_tbl_map = json.loads(blob.download_as_string())
     project_name_list = BQ_PROJECT_NAMES.split('/')
     try:
         for project_name in project_name_list:
@@ -112,17 +118,23 @@ def build_bq_metadata():
                     table_list = list(client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
                         tbl_metadata = client.get_table(tbl).to_api_repr()
-                        if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata.keys() and 'version' in \
-                                tbl_metadata['labels'].keys():
+                        if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \
+                                tbl_metadata['labels']:
                             tbl_prj_id = tbl_metadata['tableReference']['projectId']
                             tbl_ds_id = tbl_metadata['tableReference']['datasetId']
                             tbl_tbl_id = tbl_metadata['tableReference']['tableId']
                             labeled_version = tbl_metadata['labels']['version']
-                            is_latest = ('status' in tbl_metadata['labels'].keys() and tbl_metadata['labels'][
+                            is_latest = ('status' in tbl_metadata['labels'] and tbl_metadata['labels'][
                                 'status'] == 'current')
                             if tbl_ds_id.endswith('_versioned'):
                                 root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
-                                root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'_{labeled_version}'.lower())
+                                tmp_tbl_id = tbl_tbl_id
+                                if marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
+                                    for t in marked_tbl_map[tbl_prj_id][tbl_ds_id]:
+                                        if tbl_tbl_id.startswith(t):
+                                            tmp_tbl_id = tbl_tbl_id.replace(t, marked_tbl_map[tbl_prj_id][tbl_ds_id][t])
+                                            break
+                                root_tbl_tbl_id = tmp_tbl_id.removesuffix(f'_{labeled_version}'.lower())
                                 root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'_{labeled_version}'.upper())
 
                             elif tbl_tbl_id.endswith('_current'):
@@ -132,22 +144,22 @@ def build_bq_metadata():
                             version_root_id = f'{tbl_prj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
                             version_str = labeled_version.replace('_', '.')
 
-                            if version_root_id not in bq_versions_dict.keys():
+                            if version_root_id not in bq_versions_dict:
                                 bq_versions_dict[version_root_id] = {}
-                            if version_str not in bq_versions_dict[version_root_id].keys():
+                            if version_str not in bq_versions_dict[version_root_id]:
                                 bq_versions_dict[version_root_id][version_str] = {}
-                            if 'is_latest' not in bq_versions_dict[version_root_id][version_str].keys():
+                            if 'is_latest' not in bq_versions_dict[version_root_id][version_str]:
                                 bq_versions_dict[version_root_id][version_str]['is_latest'] = is_latest
                             else:
                                 bq_versions_dict[version_root_id][version_str]['is_latest'] |= is_latest
 
-                            if 'tables' not in bq_versions_dict[version_root_id][version_str].keys():
+                            if 'tables' not in bq_versions_dict[version_root_id][version_str]:
                                 bq_versions_dict[version_root_id][version_str]['tables'] = []
                             bq_versions_dict[version_root_id][version_str]['tables'].append(
                                 f'{tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}')
 
                         for k in METADATA_KEYS_TO_REMOVE:
-                            if k in tbl_metadata.keys():
+                            if k in tbl_metadata:
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
     except Exception as e:
@@ -164,7 +176,7 @@ def build_filters(metadata_list):
             "options": {}
         }
     for item in metadata_list:
-        if 'labels' in item.keys() and item['labels']:
+        if 'labels' in item and item['labels']:
             for full_label_key, label_value in item['labels'].items():
                 match = re.match(r'^\w+[^(?=_\d)]', full_label_key)
                 filter_key = match.group(0) if match else match
@@ -173,13 +185,13 @@ def build_filters(metadata_list):
                         label_value = 'metadata'
                     description = CATEGORY_DESCS[label_value] if filter_key == 'category' and CATEGORY_DESCS.get(
                         label_value) else ""
-                    if label_value not in filter_data[filter_key]["options"].keys():
+                    if label_value not in filter_data[filter_key]["options"]:
                         filter_data[filter_key]["options"][label_value] = {
                             'label': label_value.replace("_", " ").upper(),
                             'value': label_value,
                             'description': description
                         }
-        if 'tableReference' in item.keys() and item['tableReference']:
+        if 'tableReference' in item and item['tableReference']:
             proj_id = item['tableReference']['projectId']
             filter_data["project_id"]["options"][proj_id] = {
                 'label': proj_id,
@@ -197,7 +209,7 @@ def build_filters(metadata_list):
                     'description': ''
                 }
             )
-        for op in sorted(filter_data[k]["options"].keys()):
+        for op in sorted(filter_data[k]["options"]):
             options.append(filter_data[k]["options"][op])
         sorted_data[k] = {
             "options": options

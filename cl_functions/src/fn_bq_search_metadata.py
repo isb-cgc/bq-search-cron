@@ -139,7 +139,7 @@ def build_bq_metadata():
                                             version_root_id = marked_tbl_map[tbl_prj_id][tbl_ds_id][t]
                                             break
                                 if not version_root_id and tbl_ds_id.endswith('_versioned'):
-                                    root_tbl_ds_id = tbl_tbl_id.removesuffix('_versioned')
+                                    root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
                                     root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'{labeled_version}'.lower())
                                     root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'{labeled_version}'.upper())
                                     version_root_id = f'{tbl_prj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'

@@ -126,6 +126,7 @@ def build_bq_metadata():
                             labeled_version = tbl_metadata['labels']['version']
                             is_latest = ('status' in tbl_metadata['labels'] and tbl_metadata['labels'][
                                 'status'] == 'current')
+                            version_root_id = None
                             if tbl_tbl_id.endswith('_current'):
                                 root_tbl_tbl_id = tbl_tbl_id.removesuffix('current')
                                 version_root_id = f'{tbl_prj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'

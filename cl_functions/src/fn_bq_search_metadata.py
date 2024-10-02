@@ -131,7 +131,7 @@ def build_bq_metadata():
                                 version_root_id = f'{tbl_prj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
                                 is_latest = True
                             else:
-                                if marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
+                                if marked_tbl_map and tbl_prj_id in marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
                                     for t in marked_tbl_map[tbl_prj_id][tbl_ds_id]:
                                         if (t.startswith('_') and tbl_tbl_id.endswith(t)) or (
                                                 t.endswith('_') and tbl_tbl_id.startswith(t)):

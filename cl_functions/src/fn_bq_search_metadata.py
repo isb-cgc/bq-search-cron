@@ -126,21 +126,23 @@ def build_bq_metadata():
                             labeled_version = tbl_metadata['labels']['version']
                             is_latest = ('status' in tbl_metadata['labels'] and tbl_metadata['labels'][
                                 'status'] == 'current')
+                            version_root_id = None
                             if tbl_tbl_id.endswith('_current'):
                                 root_tbl_tbl_id = tbl_tbl_id.removesuffix('current')
                                 version_root_id = f'{tbl_prj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
                                 is_latest = True
                             else:
-                                if marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
+                                if marked_tbl_map and tbl_prj_id in marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
                                     for t in marked_tbl_map[tbl_prj_id][tbl_ds_id]:
                                         if (t.startswith('_') and tbl_tbl_id.endswith(t)) or (
                                                 t.endswith('_') and tbl_tbl_id.startswith(t)):
                                             version_root_id = marked_tbl_map[tbl_prj_id][tbl_ds_id][t]
                                             break
                                 if not version_root_id and tbl_ds_id.endswith('_versioned'):
+                                    root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
                                     root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'{labeled_version}'.lower())
                                     root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'{labeled_version}'.upper())
-                                    version_root_id = f'{tbl_prj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
+                                    version_root_id = f'{tbl_prj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
                             version_str = labeled_version.replace('_', '.')
                             if version_root_id and labeled_version:
                                 if version_root_id not in bq_versions_dict:

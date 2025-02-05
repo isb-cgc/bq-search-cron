@@ -35,8 +35,6 @@ CATEGORY_DESCS = {
 }
 
 METADATA_TABLE_PROJECT_ID = getenv("METADATA_TABLE_PROJECT_ID", 'isb-cgc-dev-1')
-# METADATA_TABLE_PROJECT_ID = getenv("METADATA_TABLE_PROJECT_ID", 'isb-project-zero')
-# METADATA_TABLE_DATASET_ID = getenv("METADATA_TABLE_DATASET_ID", 'etl')
 METADATA_TABLE_DATASET_ID = getenv("METADATA_TABLE_DATASET_ID", 'bqs_metadata')
 
 
@@ -121,16 +119,12 @@ def build_bq_metadata():
                 bigquery.SchemaField("friendlyName", "STRING", mode="NULLABLE"),
                 bigquery.SchemaField("description", "STRING", mode="NULLABLE"),
                 bigquery.SchemaField("metadata", "STRING", mode="NULLABLE")
-                # bigquery.SchemaField("metadata", "JSON", mode="NULLABLE")
 
             ],
             'data': {"id": [], "projectId": [], "datasetId": [], "tableId": [], "friendlyName": [], "description": [],
                      "metadata": []}
         }
     }
-    # labels_data =
-    # schema_fields_data =
-    # table_refs_data =
 
     gcs = storage.Client()
     bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
@@ -392,26 +386,26 @@ def check_for_update(last_updated):
 
 def load_metadata_tables(table_name, schema, data):
     # Construct a BigQuery client object.
-    client = bigquery.Client()
-    bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
-    client.delete_table(table=bq_table, not_found_ok=True)
-    print(
-        "Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
-    )
-    bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
-    print(
-        "Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
-    )
+    try:
+        client = bigquery.Client()
+        bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
+        client.delete_table(table=bq_table, not_found_ok=True)
+        print(
+            "Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
+        bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
+        print(
+            "Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
 
-    df = pd.DataFrame(data)
-    print('debug 1')
-    # Load data to BQ
-    bigquery_job = client.load_table_from_dataframe(df,
-                                                    f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
-    print('debug 2')
-    # bigquery_job = client.insert_rows_json(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', data)
-    bigquery_job.result()
-    print(
-        "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
-    )
-    # return bq_table
+        df = pd.DataFrame(data)
+        # Load data to BQ
+        bigquery_job = client.load_table_from_dataframe(df,
+                                                        f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
+        # bigquery_job = client.insert_rows_json(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', data)
+        bigquery_job.result()
+        print(
+            "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
+    except Exception as e:
+        print(f"[ERROR] Error has occurred while running load_metadata_tables(): {e}")

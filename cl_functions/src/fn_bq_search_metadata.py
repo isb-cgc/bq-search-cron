@@ -233,6 +233,9 @@ def build_bq_metadata():
                                     for f in tbl_metadata['schema']['fields']:
                                         bqs_tables_config['BQS_SCHEMA_FIELDS']['data']['id'].append(tbl_metadata['id'])
                                         bqs_tables_config['BQS_SCHEMA_FIELDS']['data']['name'].append(f['name'])
+                        for k in METADATA_KEYS_TO_REMOVE:
+                            if k in tbl_metadata:
+                                del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
         for tbl in bqs_tables_config:
             load_metadata_tables(tbl, bqs_tables_config[tbl]['schema'], bqs_tables_config[tbl]['data'])

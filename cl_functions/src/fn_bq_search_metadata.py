@@ -42,6 +42,17 @@ def run_bq_metadata_etl(request):
     try:
         gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
+        joins_dic = []
+        if JOIN_CSV_TO_JSON:
+            joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
+            joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
+            if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
+                print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+                joins_dic = update_example_joins_json(joins_csv_blob)
+                joins_json_string = json.dumps(joins_dic)
+                bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
+                print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
+
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
         filter_blob = bucket.get_blob(FILTERS_FILE_PATH)
@@ -49,8 +60,7 @@ def run_bq_metadata_etl(request):
         new_tables_data = []
         if metadata_blob is None or check_for_update(metadata_blob.time_created):
             print('[INFO] METADATA FILE is outdated ...')
-            new_tables_data_dict, new_bq_versions_dict = build_bq_metadata()
-            new_tables_data = list(new_tables_data_dict.values())
+            new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
             if BQ_BUILD_VERSION_JSON:
@@ -72,16 +82,6 @@ def run_bq_metadata_etl(request):
             bucket.blob(FILTERS_FILE_PATH).upload_from_string(json.dumps(bq_filters), content_type='application/json')
             print(f'[INFO] FILTERS FILE updated ...')
 
-        # joins examples update
-        if JOIN_CSV_TO_JSON:
-            joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
-            joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
-            if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
-                print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
-                joins_list = update_example_joins_json(joins_csv_blob)
-                joins_json_string = json.dumps(joins_list)
-                bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-                print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
     except Exception as e:
         print(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
         return {"code": 500, "message": f"Function <run_bq_metadata_etl> failed to run: {e}"}
@@ -90,10 +90,50 @@ def run_bq_metadata_etl(request):
     return {"code": 200, "message": message}
 
 
-def build_bq_metadata():
+# insert field data (useful join and version map info) into the applicable row
+def insert_field_data(metadata, field_map):
+    for row in metadata:
+        # insert useful join field data
+        useful_joins = []
+        # row_id = row['id']
+        if 'usefulJoins' in field_map:
+            for join in field_map.get('usefulJoins'):
+                if join['id'] == row['id']:
+                    useful_joins = join['joins']
+                    break
+        row['usefulJoins'] = useful_joins
+        table_version_info = None
+        if 'labels' in row and 'version' in row['labels']:
+            labeled_version = row['labels']['version']
+            proj_id = row['tableReference']['projectId']
+            tbl_ds_id = row['tableReference']['datasetId']
+            tbl_tbl_id = row['tableReference']['tableId']
+            version_id = None
+            if tbl_tbl_id.endswith('_current'):
+                root_tbl_tbl_id = tbl_tbl_id.removesuffix('current')
+                version_id = f'{proj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
+            else:
+                if field_map['markedTables'] and tbl_ds_id in field_map['markedTables'][proj_id]:
+                    for t in field_map['markedTables'][proj_id][tbl_ds_id]:
+                        if (t.startswith('_') and tbl_tbl_id.endswith(t)) or (
+                                t.endswith('_') and tbl_tbl_id.startswith(t)):
+                            version_id = field_map['markedTables'][proj_id][tbl_ds_id][t]
+                            break
+                if not version_id and tbl_ds_id.endswith('_versioned'):
+                    root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
+                    root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'{labeled_version}'.lower())
+                    root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'{labeled_version}'.upper())
+                    version_id = f'{proj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
+            if field_map['versions'] and version_id and version_id in field_map['versions']:
+                table_version_info = field_map['versions'][version_id]
+        row['versions'] = table_version_info
+    return metadata
+
+
+def build_bq_metadata(joins_dic):
+    new_tables_data = []
     bq_table_metadata_dict = {}
     bq_versions_dict = {}
-
     bqs_tables_config = {
         'BQS_LABELS': {
             'schema': [
@@ -237,11 +277,17 @@ def build_bq_metadata():
                             if k in tbl_metadata:
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
+        bq_field_map = {
+            'usefulJoins': joins_dic,
+            'markedTables': marked_tbl_map,
+            'versions': bq_versions_dict
+        }
+        new_tables_data = insert_field_data(list(bq_table_metadata_dict.values()), bq_field_map)
         for tbl in bqs_tables_config:
             load_metadata_tables(tbl, bqs_tables_config[tbl]['schema'], bqs_tables_config[tbl]['data'])
     except Exception as e:
         print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
-    return bq_table_metadata_dict, bq_versions_dict
+    return new_tables_data, bq_versions_dict
 
 
 def build_filters(metadata_list):

@@ -42,12 +42,6 @@ def run_bq_metadata_etl(request):
     try:
         gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
-        # joins examples update
-        # bq_field_map = {
-        #     'usefulJoins': [],
-        #     'markedTables': {},
-        #     'versions': {}
-        # }
         joins_dic = []
         if JOIN_CSV_TO_JSON:
             joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
@@ -66,13 +60,7 @@ def run_bq_metadata_etl(request):
         new_tables_data = []
         if metadata_blob is None or check_for_update(metadata_blob.time_created):
             print('[INFO] METADATA FILE is outdated ...')
-            # marked_tbl_map_blob = bucket.get_blob(MARKED_TABLE_MAP_FILE_PATH)
-            # marked_tbl_map = json.loads(marked_tbl_map_blob.download_as_string())
             new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
-            # new_tables_data = list(new_tables_data_dict.values())
-            # bq_field_map['versions'] = new_bq_versions_dict
-            # bq_field_map['markedTables'] = marked_tbl_map
-            # new_tables_data = insert_field_data(new_tables_data, joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
             if BQ_BUILD_VERSION_JSON:
@@ -104,9 +92,7 @@ def run_bq_metadata_etl(request):
 
 # insert field data (useful join and version map info) into the applicable row
 def insert_field_data(metadata, field_map):
-    print(f'metadata len {len(metadata)}')
     for row in metadata:
-        print(f'id {row["id"]}')
         # insert useful join field data
         useful_joins = []
         # row_id = row['id']
@@ -116,15 +102,11 @@ def insert_field_data(metadata, field_map):
                     useful_joins = join['joins']
                     break
         row['usefulJoins'] = useful_joins
-        print("usefulJoins assigned")
         table_version_info = None
         if 'labels' in row and 'version' in row['labels']:
             labeled_version = row['labels']['version']
-            print(f'{labeled_version}')
             proj_id = row['tableReference']['projectId']
-            print(f'{proj_id}')
             tbl_ds_id = row['tableReference']['datasetId']
-            print(f'{tbl_ds_id}')
             tbl_tbl_id = row['tableReference']['tableId']
             version_id = None
             if tbl_tbl_id.endswith('_current'):

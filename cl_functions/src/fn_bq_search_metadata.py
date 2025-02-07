@@ -91,23 +91,22 @@ def run_bq_metadata_etl(request):
 
 
 # insert field data (useful join and version map info) into the applicable row
-def insert_field_data(metadata, field_map):
-    for row in metadata:
+def process_metadata(table_refs_data, field_map):
+    for i in range(len(table_refs_data['id'])):
         # insert useful join field data
         useful_joins = []
-        # row_id = row['id']
         if 'usefulJoins' in field_map:
             for join in field_map.get('usefulJoins'):
-                if join['id'] == row['id']:
+                if join['id'] == table_refs_data['id'][i]:
                     useful_joins = join['joins']
                     break
-        row['usefulJoins'] = useful_joins
+        table_refs_data['metadata'][i]['usefulJoins'] = useful_joins
         table_version_info = None
-        if 'labels' in row and 'version' in row['labels']:
-            labeled_version = row['labels']['version']
-            proj_id = row['tableReference']['projectId']
-            tbl_ds_id = row['tableReference']['datasetId']
-            tbl_tbl_id = row['tableReference']['tableId']
+        if 'labels' in table_refs_data['metadata'][i] and 'version' in table_refs_data['metadata'][i]['labels']:
+            labeled_version = table_refs_data['metadata'][i]['labels']['version']
+            proj_id = table_refs_data['projectId'][i]
+            tbl_ds_id = table_refs_data['datasetId'][i]
+            tbl_tbl_id = table_refs_data['tableId'][i]
             version_id = None
             if tbl_tbl_id.endswith('_current'):
                 root_tbl_tbl_id = tbl_tbl_id.removesuffix('current')
@@ -126,12 +125,12 @@ def insert_field_data(metadata, field_map):
                     version_id = f'{proj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
             if field_map['versions'] and version_id and version_id in field_map['versions']:
                 table_version_info = field_map['versions'][version_id]
-        row['versions'] = table_version_info
-    return metadata
+        table_refs_data['metadata'][i]['versions'] = table_version_info
+        table_refs_data['metadata'][i] = json.dumps(table_refs_data['metadata'][i])
+    return table_refs_data
 
 
 def build_bq_metadata(joins_dic):
-    new_tables_data = []
     bq_table_metadata_dict = {}
     bq_versions_dict = {}
     bqs_tables_config = {
@@ -252,7 +251,7 @@ def build_bq_metadata(joins_dic):
                                 tbl_metadata['friendlyName'] if 'friendlyName' in tbl_metadata else '')
                             bqs_tables_config['BQS_TABLE_REFS']['data']['description'].append(
                                 tbl_metadata['description'] if 'description' in tbl_metadata else '')
-                            bqs_tables_config['BQS_TABLE_REFS']['data']['metadata'].append(json.dumps(tbl_metadata))
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['metadata'].append(tbl_metadata)
                             if 'labels' in tbl_metadata:
                                 for k in tbl_metadata['labels']:
                                     if k in ['version', 'status', 'access', 'category',
@@ -282,12 +281,14 @@ def build_bq_metadata(joins_dic):
             'markedTables': marked_tbl_map,
             'versions': bq_versions_dict
         }
-        new_tables_data = insert_field_data(list(bq_table_metadata_dict.values()), bq_field_map)
+
+        bqs_tables_config['BQS_TABLE_REFS']['data'] = process_metadata(bqs_tables_config['BQS_TABLE_REFS']['data'],
+                                                                        bq_field_map)
         for tbl in bqs_tables_config:
             load_metadata_tables(tbl, bqs_tables_config[tbl]['schema'], bqs_tables_config[tbl]['data'])
     except Exception as e:
         print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
-    return new_tables_data, bq_versions_dict
+    return list(bq_table_metadata_dict.values()), bq_versions_dict
 
 
 def build_filters(metadata_list):
@@ -451,7 +452,6 @@ def load_metadata_tables(table_name, schema, data):
         # Load data to BQ
         bigquery_job = client.load_table_from_dataframe(df,
                                                         f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
-        # bigquery_job = client.insert_rows_json(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', data)
         bigquery_job.result()
         print(
             "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)

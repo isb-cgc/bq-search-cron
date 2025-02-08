@@ -46,12 +46,13 @@ def run_bq_metadata_etl(request):
         if JOIN_CSV_TO_JSON:
             joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
             joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
-            if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
-                print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+            if joins_csv_blob:
                 joins_dic = update_example_joins_json(joins_csv_blob)
-                joins_json_string = json.dumps(joins_dic)
-                bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-                print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
+                if not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created:
+                    print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+                    joins_json_string = json.dumps(joins_dic)
+                    bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
+                    print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
 
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
@@ -96,7 +97,7 @@ def process_metadata(table_refs_data, field_map):
         # insert useful join field data
         useful_joins = []
         if 'usefulJoins' in field_map:
-            for join in field_map.get('usefulJoins'):
+            for join in field_map['usefulJoins']:
                 if join['id'] == table_refs_data['id'][i]:
                     useful_joins = join['joins']
                     break

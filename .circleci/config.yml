@@ -130,7 +130,7 @@ jobs:
       - deployment_setup
       - auth
       - deployment_config
-      - deploy:
+      - run:
           command: |
             sudo -E /bin/bash ./shell/deployments.sh
 workflows:

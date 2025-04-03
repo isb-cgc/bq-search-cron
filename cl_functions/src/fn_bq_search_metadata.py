@@ -3,6 +3,7 @@ import json
 from os import getenv
 import re
 import csv
+import pandas as pd
 
 STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'webapp-static-files-isb-cgc-dev')
 METADATA_FILE_PATH = getenv("METADATA_FILE_PATH", 'bq_ecosys/bq_meta_data.json')
@@ -33,11 +34,26 @@ CATEGORY_DESCS = {
     "processed_-omics_data": "Processed data primarily from the GDC (e.g. raw data that has gone through GDC pipeline processing)"
 }
 
+METADATA_TABLE_PROJECT_ID = getenv("METADATA_TABLE_PROJECT_ID", 'isb-cgc-dev-1')
+METADATA_TABLE_DATASET_ID = getenv("METADATA_TABLE_DATASET_ID", 'bqs_metadata')
+
 
 def run_bq_metadata_etl(request):
     try:
         gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
+        joins_dic = []
+        if JOIN_CSV_TO_JSON:
+            joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
+            joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
+            if joins_csv_blob:
+                joins_dic = update_example_joins_json(joins_csv_blob)
+                if not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created:
+                    print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+                    joins_json_string = json.dumps(joins_dic)
+                    bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
+                    print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
+
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
         filter_blob = bucket.get_blob(FILTERS_FILE_PATH)
@@ -45,8 +61,7 @@ def run_bq_metadata_etl(request):
         new_tables_data = []
         if metadata_blob is None or check_for_update(metadata_blob.time_created):
             print('[INFO] METADATA FILE is outdated ...')
-            new_tables_data_dict, new_bq_versions_dict = build_bq_metadata()
-            new_tables_data = list(new_tables_data_dict.values())
+            new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
             if BQ_BUILD_VERSION_JSON:
@@ -68,16 +83,6 @@ def run_bq_metadata_etl(request):
             bucket.blob(FILTERS_FILE_PATH).upload_from_string(json.dumps(bq_filters), content_type='application/json')
             print(f'[INFO] FILTERS FILE updated ...')
 
-        # joins examples update
-        if JOIN_CSV_TO_JSON:
-            joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
-            joins_json_blob = bucket.get_blob(JOINS_JSON_FILE_PATH)
-            if joins_csv_blob and (not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created):
-                print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
-                joins_list = update_example_joins_json(joins_csv_blob)
-                joins_json_string = json.dumps(joins_list)
-                bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-                print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
     except Exception as e:
         print(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
         return {"code": 500, "message": f"Function <run_bq_metadata_etl> failed to run: {e}"}
@@ -86,9 +91,81 @@ def run_bq_metadata_etl(request):
     return {"code": 200, "message": message}
 
 
-def build_bq_metadata():
+# insert field data (useful join and version map info) into the applicable row
+def process_metadata(table_refs_data, field_map):
+    for i in range(len(table_refs_data['id'])):
+        # insert useful join field data
+        useful_joins = []
+        if 'usefulJoins' in field_map:
+            for join in field_map['usefulJoins']:
+                if join['id'] == table_refs_data['id'][i]:
+                    useful_joins = join['joins']
+                    break
+        table_refs_data['metadata'][i]['usefulJoins'] = useful_joins
+        table_version_info = None
+        if 'labels' in table_refs_data['metadata'][i] and 'version' in table_refs_data['metadata'][i]['labels']:
+            labeled_version = table_refs_data['metadata'][i]['labels']['version']
+            proj_id = table_refs_data['projectId'][i]
+            tbl_ds_id = table_refs_data['datasetId'][i]
+            tbl_tbl_id = table_refs_data['tableId'][i]
+            version_id = None
+            if tbl_tbl_id.endswith('_current'):
+                root_tbl_tbl_id = tbl_tbl_id.removesuffix('current')
+                version_id = f'{proj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
+            else:
+                if field_map['markedTables'] and tbl_ds_id in field_map['markedTables'][proj_id]:
+                    for t in field_map['markedTables'][proj_id][tbl_ds_id]:
+                        if (t.startswith('_') and tbl_tbl_id.endswith(t)) or (
+                                t.endswith('_') and tbl_tbl_id.startswith(t)):
+                            version_id = field_map['markedTables'][proj_id][tbl_ds_id][t]
+                            break
+                if not version_id and tbl_ds_id.endswith('_versioned'):
+                    root_tbl_ds_id = tbl_ds_id.removesuffix('_versioned')
+                    root_tbl_tbl_id = tbl_tbl_id.removesuffix(f'{labeled_version}'.lower())
+                    root_tbl_tbl_id = root_tbl_tbl_id.removesuffix(f'{labeled_version}'.upper())
+                    version_id = f'{proj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
+            if field_map['versions'] and version_id and version_id in field_map['versions']:
+                table_version_info = field_map['versions'][version_id]
+        table_refs_data['metadata'][i]['versions'] = table_version_info
+        table_refs_data['metadata'][i] = json.dumps(table_refs_data['metadata'][i])
+    return table_refs_data
+
+
+def build_bq_metadata(joins_dic):
     bq_table_metadata_dict = {}
     bq_versions_dict = {}
+    bqs_tables_config = {
+        'BQS_LABELS': {
+            'schema': [
+                bigquery.SchemaField("id", "STRING", mode="REQUIRED"),
+                bigquery.SchemaField("labelKey", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("labelValue", "STRING", mode="NULLABLE")
+            ],
+            'data': {"id": [], "labelKey": [], "labelValue": []}
+        },
+        'BQS_SCHEMA_FIELDS': {
+            'schema': [
+                bigquery.SchemaField("id", "STRING", mode="REQUIRED"),
+                bigquery.SchemaField("name", "STRING", mode="NULLABLE"),
+            ],
+            'data': {"id": [], "name": []}
+        },
+        'BQS_TABLE_REFS': {
+            'schema': [
+                bigquery.SchemaField("id", "STRING", mode="REQUIRED"),
+                bigquery.SchemaField("projectId", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("datasetId", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("tableId", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("friendlyName", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("description", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("metadata", "STRING", mode="NULLABLE")
+
+            ],
+            'data': {"id": [], "projectId": [], "datasetId": [], "tableId": [], "friendlyName": [], "description": [],
+                     "metadata": []}
+        }
+    }
+
     gcs = storage.Client()
     bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
     blob = bucket.get_blob(MARKED_TABLE_MAP_FILE_PATH)
@@ -132,7 +209,8 @@ def build_bq_metadata():
                                 version_root_id = f'{tbl_prj_id}:{tbl_ds_id}.{root_tbl_tbl_id}'
                                 is_latest = True
                             else:
-                                if marked_tbl_map and tbl_prj_id in marked_tbl_map and tbl_ds_id in marked_tbl_map[tbl_prj_id]:
+                                if marked_tbl_map and tbl_prj_id in marked_tbl_map and tbl_ds_id in marked_tbl_map[
+                                    tbl_prj_id]:
                                     for t in marked_tbl_map[tbl_prj_id][tbl_ds_id]:
                                         if (t.startswith('_') and tbl_tbl_id.endswith(t)) or (
                                                 t.endswith('_') and tbl_tbl_id.startswith(t)):
@@ -159,15 +237,59 @@ def build_bq_metadata():
                                 bq_versions_dict[version_root_id][version_str]['tables'].append(
                                     f'{tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}')
                             else:
-                                print(f"[WARNING] Unable to build a version tree for table {tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}")
+                                print(
+                                    f"[WARNING] Unable to build a version tree for table {tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}")
 
+                        if tbl_metadata:
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['id'].append(tbl_metadata['id'])
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['projectId'].append(
+                                tbl_metadata['tableReference']['projectId'])
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['datasetId'].append(
+                                tbl_metadata['tableReference']['datasetId'])
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['tableId'].append(
+                                tbl_metadata['tableReference']['tableId'])
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['friendlyName'].append(
+                                tbl_metadata['friendlyName'] if 'friendlyName' in tbl_metadata else '')
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['description'].append(
+                                tbl_metadata['description'] if 'description' in tbl_metadata else '')
+                            bqs_tables_config['BQS_TABLE_REFS']['data']['metadata'].append(tbl_metadata)
+                            if 'labels' in tbl_metadata:
+                                for k in tbl_metadata['labels']:
+                                    if k in ['version', 'status', 'access', 'category',
+                                             'experimental_strategy']:
+                                        label_key = k
+                                    else:
+                                        for f in ['program', 'data_type', 'reference_genome', 'source']:
+                                            if k.startswith(f):
+                                                label_key = f
+                                    if label_key:
+                                        bqs_tables_config['BQS_LABELS']['data']['id'].append(tbl_metadata['id'])
+                                        bqs_tables_config['BQS_LABELS']['data']['labelKey'].append(label_key)
+                                        bqs_tables_config['BQS_LABELS']['data']['labelValue'].append(
+                                            tbl_metadata['labels'][k])
+
+                            if 'schema' in tbl_metadata:
+                                if 'fields' in tbl_metadata['schema']:
+                                    for f in tbl_metadata['schema']['fields']:
+                                        bqs_tables_config['BQS_SCHEMA_FIELDS']['data']['id'].append(tbl_metadata['id'])
+                                        bqs_tables_config['BQS_SCHEMA_FIELDS']['data']['name'].append(f['name'])
                         for k in METADATA_KEYS_TO_REMOVE:
                             if k in tbl_metadata:
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
+        bq_field_map = {
+            'usefulJoins': joins_dic,
+            'markedTables': marked_tbl_map,
+            'versions': bq_versions_dict
+        }
+
+        bqs_tables_config['BQS_TABLE_REFS']['data'] = process_metadata(bqs_tables_config['BQS_TABLE_REFS']['data'],
+                                                                        bq_field_map)
+        for tbl in bqs_tables_config:
+            load_metadata_tables(tbl, bqs_tables_config[tbl]['schema'], bqs_tables_config[tbl]['data'])
     except Exception as e:
         print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
-    return bq_table_metadata_dict, bq_versions_dict
+    return list(bq_table_metadata_dict.values()), bq_versions_dict
 
 
 def build_filters(metadata_list):
@@ -311,3 +433,29 @@ def check_for_update(last_updated):
     except Exception as e:
         print(f"[ERROR] Error has occurred while running check_for_update(): {e}")
     return update_needed
+
+
+def load_metadata_tables(table_name, schema, data):
+    # Construct a BigQuery client object.
+    try:
+        client = bigquery.Client()
+        bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
+        client.delete_table(table=bq_table, not_found_ok=True)
+        print(
+            "Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
+        bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
+        print(
+            "Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
+
+        df = pd.DataFrame(data)
+        # Load data to BQ
+        bigquery_job = client.load_table_from_dataframe(df,
+                                                        f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
+        bigquery_job.result()
+        print(
+            "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        )
+    except Exception as e:
+        print(f"[ERROR] Error has occurred while running load_metadata_tables(): {e}")

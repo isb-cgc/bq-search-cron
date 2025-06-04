@@ -94,15 +94,8 @@ def run_bq_metadata_etl(request):
 # insert field data (useful join and version map info) into the applicable row
 def process_metadata(table_refs_data, field_map):
     for i in range(len(table_refs_data['id'])):
-        # insert useful join field data
-        useful_joins = []
-        if 'usefulJoins' in field_map:
-            for join in field_map['usefulJoins']:
-                if join['id'] == table_refs_data['id'][i]:
-                    useful_joins = join['joins']
-                    break
-        table_refs_data['metadata'][i]['usefulJoins'] = useful_joins
         table_version_info = None
+        current_table_id = table_refs_data['id'][i]
         if 'labels' in table_refs_data['metadata'][i] and 'version' in table_refs_data['metadata'][i]['labels']:
             labeled_version = table_refs_data['metadata'][i]['labels']['version']
             proj_id = table_refs_data['projectId'][i]
@@ -126,6 +119,19 @@ def process_metadata(table_refs_data, field_map):
                     version_id = f'{proj_id}:{root_tbl_ds_id}.{root_tbl_tbl_id}'
             if field_map['versions'] and version_id and version_id in field_map['versions']:
                 table_version_info = field_map['versions'][version_id]
+                for v in table_version_info:
+                    if table_version_info[v]['is_latest'] and table_version_info[v]['tables'] :
+                        current_table_id = table_version_info[v]['tables'][0]
+                        break
+
+        # insert useful join field data
+        useful_joins = []
+        if 'usefulJoins' in field_map:
+            for join in field_map['usefulJoins']:
+                if join['id'] == current_table_id:
+                    useful_joins = join['joins']
+                    break
+        table_refs_data['metadata'][i]['usefulJoins'] = useful_joins
         table_refs_data['metadata'][i]['versions'] = table_version_info
         table_refs_data['metadata'][i] = json.dumps(table_refs_data['metadata'][i])
     return table_refs_data

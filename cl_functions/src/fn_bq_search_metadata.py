@@ -5,7 +5,7 @@ import re
 import csv
 import pandas as pd
 
-STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'webapp-static-files-isb-cgc-dev')
+STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'isb-cgc-dev-bqs-metadata')
 METADATA_FILE_PATH = getenv("METADATA_FILE_PATH", 'bq_ecosys/bq_meta_data.json')
 FILTERS_FILE_PATH = getenv("FILTERS_FILE_PATH", 'bq_ecosys/bq_meta_filters.json')
 JOIN_CSV_TO_JSON = bool(getenv("JOIN_CSV_TO_JSON", "True") == "True")

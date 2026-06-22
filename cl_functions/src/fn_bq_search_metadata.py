@@ -25,7 +25,7 @@ METADATA_KEYS_TO_REMOVE = ['kind', 'etag', 'selfLink', 'numBytes', 'numLongTermB
                            'numLongTermLogicalBytes', 'numTotalPhysicalBytes', 'numActivePhysicalBytes',
                            'numLongTermPhysicalBytes']
 FILTERS = ['category', 'status', 'program', 'data_type', 'experimental_strategy', 'reference_genome', 'source',
-           'project_id']
+           'project_id','species']
 
 CATEGORY_DESCS = {
     "clinical_biospecimen_data": "Patient case and sample information ",
@@ -265,7 +265,7 @@ def build_bq_metadata(joins_dic):
                                              'experimental_strategy']:
                                         label_key = k
                                     else:
-                                        for f in ['program', 'data_type', 'reference_genome', 'source']:
+                                        for f in ['program', 'data_type', 'reference_genome', 'source', 'species']:
                                             if k.startswith(f):
                                                 label_key = f
                                     if label_key:

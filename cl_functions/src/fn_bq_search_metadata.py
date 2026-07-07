@@ -13,6 +13,7 @@ JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.cs
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
 VERSIONS_JSON_FILE_PATH = getenv("VERSIONS_JSON_FILE_PATH", "bq_ecosys/bq_versions.json")
 MARKED_TABLE_MAP_FILE_PATH = getenv("MARKED_TABLE_MAP_FILE_PATH", 'bq_ecosys/bq_marked_tbl_map.json')
+RUN_ANYWAYS = getenv("RUN_ANYWAYS", 'bq_ecosys/bq_run_anyways.txt')
 
 BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc/isb-cgc-bq")
 BQ_ECO_SCAN_LABELS_ONLY = bool(getenv("BQ_ECO_SCAN_LABELS_ONLY", "False") == "True")
@@ -42,6 +43,7 @@ def run_bq_metadata_etl(request):
     try:
         gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
+        run_anyways_blob = bucket.blob(RUN_ANYWAYS)
         joins_dic = []
         if JOIN_CSV_TO_JSON:
             joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
@@ -59,7 +61,7 @@ def run_bq_metadata_etl(request):
         filter_blob = bucket.get_blob(FILTERS_FILE_PATH)
         update_filter = False or not filter_blob
         new_tables_data = []
-        if metadata_blob is None or check_for_update(metadata_blob.time_created):
+        if metadata_blob is None or check_for_update(metadata_blob.time_created) or run_anyways_blob.exists():
             print('[INFO] METADATA FILE is outdated ...')
             new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),

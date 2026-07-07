@@ -466,11 +466,11 @@ def load_metadata_tables(table_name, schema, data):
         bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
         client.delete_table(table=bq_table, not_found_ok=True)
         logger.info(
-            "Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+            "[STATUS] Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
         bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
         logger.info(
-            "Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+            "[STATUS] Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
 
         df = pd.DataFrame(data)
@@ -479,7 +479,7 @@ def load_metadata_tables(table_name, schema, data):
                                                         f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
         bigquery_job.result()
         logger.info(
-            "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+            "[STATUS] Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
     except Exception as e:
         logger.error(f"[ERROR] Error has occurred while running load_metadata_tables(): {e}")

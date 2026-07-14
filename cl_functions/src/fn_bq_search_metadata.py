@@ -198,6 +198,7 @@ def build_bq_metadata(joins_dic):
             logger.info(f'[STATUS] Building BQ Metadata: Scanning from project [{project_name}] ...')
             bq_client = bigquery.Client(project=project_name)
             dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
+            logger.info(f'[STATUS] Dataset list for {project_name}: {dataset_list}')
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 read_this_dataset = False
@@ -213,7 +214,9 @@ def build_bq_metadata(joins_dic):
                             read_this_dataset = True
                             break
                 if read_this_dataset:
+                    logger.info(f'[STATUS] Processing dataset {dataset.dataset_id}')
                     table_list = list(bq_client.list_tables(dataset.dataset_id))
+                    logger.info(f"[STATUS] Tables in dataset {dataset.dataset_id}: {table_list}")
                     for tbl in table_list:
                         tbl_metadata = bq_client.get_table(tbl).to_api_repr()
                         if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \

@@ -196,8 +196,8 @@ def build_bq_metadata(joins_dic):
     try:
         for project_name in project_name_list:
             logger.info(f'[STATUS] Building BQ Metadata: Scanning from project [{project_name}] ...')
-            client = bigquery.Client(project=project_name)
-            dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
+            bq_client = bigquery.Client(project=project_name)
+            dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 read_this_dataset = False
@@ -207,15 +207,15 @@ def build_bq_metadata(joins_dic):
                     read_this_dataset = True
                 else:
                     # check if dataset is public
-                    ds_access_entries = client.get_dataset(dataset.dataset_id).access_entries
+                    ds_access_entries = bq_client.get_dataset(dataset.dataset_id).access_entries
                     for access_entry in ds_access_entries:
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
                 if read_this_dataset:
-                    table_list = list(client.list_tables(dataset.dataset_id))
+                    table_list = list(bq_client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
-                        tbl_metadata = client.get_table(tbl).to_api_repr()
+                        tbl_metadata = bq_client.get_table(tbl).to_api_repr()
                         if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \
                                 tbl_metadata['labels']:
                             tbl_prj_id = tbl_metadata['tableReference']['projectId']
@@ -420,10 +420,10 @@ def check_for_update(last_updated):
             if update_needed:
                 break
             logger.info(f'[STATUS] Checking for updates from project <{project_name}> ...')
-            client = bigquery.Client(project=project_name)
+            bq_client = bigquery.Client(project=project_name)
 
-            # dataset_list = client.list_datasets()
-            dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
+            # dataset_list = bq_client.list_datasets()
+            dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
 
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
@@ -437,16 +437,16 @@ def check_for_update(last_updated):
                     read_this_dataset = True
                 else:
                     # check if dataset is public
-                    ds_access_entries = client.get_dataset(dataset.dataset_id).access_entries
+                    ds_access_entries = bq_client.get_dataset(dataset.dataset_id).access_entries
                     for access_entry in ds_access_entries:
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
                 # logger.info(f'read_this_dataset: {read_this_dataset}')
                 if read_this_dataset:
-                    table_list = list(client.list_tables(dataset.dataset_id))
+                    table_list = list(bq_client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
-                        t = client.get_table(tbl)
+                        t = bq_client.get_table(tbl)
                         if last_updated < t.modified:
                             update_needed = True
                             logger.info(
@@ -462,20 +462,20 @@ def check_for_update(last_updated):
 def load_metadata_tables(table_name, schema, data):
     # Construct a BigQuery client object.
     try:
-        client = bigquery.Client()
+        bq_client = bigquery.Client()
         bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
-        client.delete_table(table=bq_table, not_found_ok=True)
+        bq_client.delete_table(table=bq_table, not_found_ok=True)
         logger.info(
             "[STATUS] Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
-        bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
+        bq_table = bq_client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
         logger.info(
             "[STATUS] Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
 
         df = pd.DataFrame(data)
         # Load data to BQ
-        bigquery_job = client.load_table_from_dataframe(df,
+        bigquery_job = bq_client.load_table_from_dataframe(df,
                                                         f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
         bigquery_job.result()
         logger.info(

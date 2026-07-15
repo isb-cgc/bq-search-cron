@@ -61,10 +61,10 @@ def run_bq_metadata_etl(request):
             if joins_csv_blob:
                 joins_dic = update_example_joins_json(joins_csv_blob)
                 if not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created:
-                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE is outdated ...')
+                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE is outdated...')
                     joins_json_string = json.dumps(joins_dic)
                     bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE updated ...')
+                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE updated.')
 
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
@@ -74,18 +74,18 @@ def run_bq_metadata_etl(request):
         if metadata_blob is None or check_for_update(metadata_blob.time_created) or run_anyways_blob.exists():
             if run_anyways_blob.exists():
                 logger.info("[STATUS] Saw run anyways directive.")
-            logger.info('[STATUS] METADATA FILE is outdated ...')
+            logger.info('[STATUS] METADATA FILE is outdated...')
             new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
             if BQ_BUILD_VERSION_JSON:
                 bucket.blob(VERSIONS_JSON_FILE_PATH).upload_from_string(json.dumps(new_bq_versions_dict),
                                                                         content_type='application/json')
-                logger.info('[STATUS] VERSION FILE updated ...')
-            logger.info('[STATUS] METADATA FILE updated ...')
+                logger.info('[STATUS] VERSION FILE updated.')
+            logger.info('[STATUS] METADATA FILE updated.')
             update_filter = True
         if update_filter:
-            logger.info('[STATUS] FILTERS FILE is outdated ...')
+            logger.info('[STATUS] FILTERS FILE is outdated...')
             if not len(new_tables_data):
                 if metadata_blob is None:
                     metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
@@ -95,7 +95,7 @@ def run_bq_metadata_etl(request):
                 new_tables_data = json.loads(last_metadata_json_str)
             bq_filters = build_filters(new_tables_data)
             bucket.blob(FILTERS_FILE_PATH).upload_from_string(json.dumps(bq_filters), content_type='application/json')
-            logger.info(f'[STATUS] FILTERS FILE updated ...')
+            logger.info(f'[STATUS] FILTERS FILE updated.')
 
     except Exception as e:
         logger.error(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
@@ -200,8 +200,11 @@ def build_bq_metadata(joins_dic):
             dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
             logger.info(f'[STATUS] Dataset list for {project_name}: {dataset_list}')
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
+            dataset_proc = []
             for dataset in dataset_list:
                 read_this_dataset = False
+                dataset_tables = []
+                logger.info(f'[STATUS] Processing dataset {dataset.dataset_id}')
                 if dataset.dataset_id.startswith('bq_log') or dataset.dataset_id.startswith('bq_metrics'):
                     continue
                 elif not read_public_only:
@@ -214,10 +217,9 @@ def build_bq_metadata(joins_dic):
                             read_this_dataset = True
                             break
                 if read_this_dataset:
-                    logger.info(f'[STATUS] Processing dataset {dataset.dataset_id}')
                     table_list = list(bq_client.list_tables(dataset.dataset_id))
-                    logger.info(f"[STATUS] Tables in dataset {dataset.dataset_id}: {table_list}")
                     for tbl in table_list:
+                        dataset_tables.append(tbl.table_id)
                         tbl_metadata = bq_client.get_table(tbl).to_api_repr()
                         if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \
                                 tbl_metadata['labels']:
@@ -301,6 +303,7 @@ def build_bq_metadata(joins_dic):
                             if k in tbl_metadata:
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
+                dataset_proc.append({dataset.dataset_id: {"read": read_this_dataset, "tables": dataset_tables}})
         bq_field_map = {
             'usefulJoins': joins_dic,
             'markedTables': marked_tbl_map,
@@ -445,7 +448,6 @@ def check_for_update(last_updated):
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
-                # logger.info(f'read_this_dataset: {read_this_dataset}')
                 if read_this_dataset:
                     table_list = list(bq_client.list_tables(dataset.dataset_id))
                     for tbl in table_list:

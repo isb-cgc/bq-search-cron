@@ -1,9 +1,19 @@
 from google.cloud import bigquery, storage
 import json
 from os import getenv
+import google.cloud.logging
 import re
 import csv
 import pandas as pd
+
+import logging
+
+client = google.cloud.logging_v2.Client()
+client.setup_logging()
+
+logger = logging.getLogger(__name__)
+
+logger.info("[STATUS] Logging enabled.")
 
 STATIC_BUCKET_NAME = getenv("STATIC_BUCKET_NAME", 'isb-cgc-dev-bqs-metadata')
 METADATA_FILE_PATH = getenv("METADATA_FILE_PATH", 'bq_ecosys/bq_meta_data.json')
@@ -13,6 +23,7 @@ JOINS_CSV_FILE_PATH = getenv("JOINS_CSV_FILE_PATH", "bq_ecosys/bq_useful_join.cs
 JOINS_JSON_FILE_PATH = getenv("JOINS_JSON_FILE_PATH", "bq_ecosys/bq_useful_join.json")
 VERSIONS_JSON_FILE_PATH = getenv("VERSIONS_JSON_FILE_PATH", "bq_ecosys/bq_versions.json")
 MARKED_TABLE_MAP_FILE_PATH = getenv("MARKED_TABLE_MAP_FILE_PATH", 'bq_ecosys/bq_marked_tbl_map.json')
+RUN_ANYWAYS = getenv("RUN_ANYWAYS", 'bq_ecosys/bq_run_anyways.txt')
 
 BQ_PROJECT_NAMES = getenv("BQ_PROJECT_NAMES", "isb-cgc/isb-cgc-bq")
 BQ_ECO_SCAN_LABELS_ONLY = bool(getenv("BQ_ECO_SCAN_LABELS_ONLY", "False") == "True")
@@ -25,7 +36,7 @@ METADATA_KEYS_TO_REMOVE = ['kind', 'etag', 'selfLink', 'numBytes', 'numLongTermB
                            'numLongTermLogicalBytes', 'numTotalPhysicalBytes', 'numActivePhysicalBytes',
                            'numLongTermPhysicalBytes']
 FILTERS = ['category', 'status', 'program', 'data_type', 'experimental_strategy', 'reference_genome', 'source',
-           'project_id']
+           'project_id','species']
 
 CATEGORY_DESCS = {
     "clinical_biospecimen_data": "Patient case and sample information ",
@@ -42,6 +53,7 @@ def run_bq_metadata_etl(request):
     try:
         gcs = storage.Client()
         bucket = gcs.get_bucket(STATIC_BUCKET_NAME)
+        run_anyways_blob = bucket.blob(RUN_ANYWAYS)
         joins_dic = []
         if JOIN_CSV_TO_JSON:
             joins_csv_blob = bucket.get_blob(JOINS_CSV_FILE_PATH)
@@ -49,29 +61,31 @@ def run_bq_metadata_etl(request):
             if joins_csv_blob:
                 joins_dic = update_example_joins_json(joins_csv_blob)
                 if not joins_json_blob or joins_csv_blob.updated > joins_json_blob.time_created:
-                    print(f'[INFO] JOINS EXAMPLE JSON FILE is outdated ...')
+                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE is outdated...')
                     joins_json_string = json.dumps(joins_dic)
                     bucket.blob(JOINS_JSON_FILE_PATH).upload_from_string(joins_json_string, content_type='application/json')
-                    print(f'[INFO] JOINS EXAMPLE JSON FILE updated ...')
+                    logger.info(f'[STATUS] JOINS EXAMPLE JSON FILE updated.')
 
         # metadata update
         metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
         filter_blob = bucket.get_blob(FILTERS_FILE_PATH)
         update_filter = False or not filter_blob
         new_tables_data = []
-        if metadata_blob is None or check_for_update(metadata_blob.time_created):
-            print('[INFO] METADATA FILE is outdated ...')
+        if metadata_blob is None or check_for_update(metadata_blob.time_created) or run_anyways_blob.exists():
+            if run_anyways_blob.exists():
+                logger.info("[STATUS] Saw run anyways directive.")
+            logger.info('[STATUS] METADATA FILE is outdated...')
             new_tables_data, new_bq_versions_dict = build_bq_metadata(joins_dic)
             bucket.blob(METADATA_FILE_PATH).upload_from_string(json.dumps(new_tables_data),
                                                                content_type='application/json')
             if BQ_BUILD_VERSION_JSON:
                 bucket.blob(VERSIONS_JSON_FILE_PATH).upload_from_string(json.dumps(new_bq_versions_dict),
                                                                         content_type='application/json')
-                print('[INFO] VERSION FILE updated ...')
-            print('[INFO] METADATA FILE updated ...')
+                logger.info('[STATUS] VERSION FILE updated.')
+            logger.info('[STATUS] METADATA FILE updated.')
             update_filter = True
         if update_filter:
-            print('[INFO] FILTERS FILE is outdated ...')
+            logger.info('[STATUS] FILTERS FILE is outdated...')
             if not len(new_tables_data):
                 if metadata_blob is None:
                     metadata_blob = bucket.get_blob(METADATA_FILE_PATH)
@@ -81,13 +95,14 @@ def run_bq_metadata_etl(request):
                 new_tables_data = json.loads(last_metadata_json_str)
             bq_filters = build_filters(new_tables_data)
             bucket.blob(FILTERS_FILE_PATH).upload_from_string(json.dumps(bq_filters), content_type='application/json')
-            print(f'[INFO] FILTERS FILE updated ...')
+            logger.info(f'[STATUS] FILTERS FILE updated.')
 
     except Exception as e:
-        print(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
+        logger.error(f"[ERROR] Function <run_bq_metadata_etl> failed to run: {e}")
+        logger.exception(e)
         return {"code": 500, "message": f"Function <run_bq_metadata_etl> failed to run: {e}"}
     message = "Function <run_bq_metadata_etl> ran successfully."
-    print(f'[INFO] {message}')
+    logger.info(f'[STATUS] {message}')
     return {"code": 200, "message": message}
 
 
@@ -180,9 +195,9 @@ def build_bq_metadata(joins_dic):
     project_name_list = BQ_PROJECT_NAMES.split('/')
     try:
         for project_name in project_name_list:
-            print(f'[INFO] Building BQ Metadata: Scanning from project [{project_name}] ...')
-            client = bigquery.Client(project=project_name)
-            dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
+            logger.info(f'[STATUS] Building BQ Metadata: Scanning from project [{project_name}] ...')
+            bq_client = bigquery.Client(project=project_name)
+            dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 read_this_dataset = False
@@ -192,15 +207,15 @@ def build_bq_metadata(joins_dic):
                     read_this_dataset = True
                 else:
                     # check if dataset is public
-                    ds_access_entries = client.get_dataset(dataset.dataset_id).access_entries
+                    ds_access_entries = bq_client.get_dataset(dataset.dataset_id).access_entries
                     for access_entry in ds_access_entries:
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
                 if read_this_dataset:
-                    table_list = list(client.list_tables(dataset.dataset_id))
+                    table_list = list(bq_client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
-                        tbl_metadata = client.get_table(tbl).to_api_repr()
+                        tbl_metadata = bq_client.get_table(tbl).to_api_repr()
                         if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \
                                 tbl_metadata['labels']:
                             tbl_prj_id = tbl_metadata['tableReference']['projectId']
@@ -243,7 +258,7 @@ def build_bq_metadata(joins_dic):
                                 bq_versions_dict[version_root_id][version_str]['tables'].append(
                                     f'{tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}')
                             else:
-                                print(
+                                logger.warning(
                                     f"[WARNING] Unable to build a version tree for table {tbl_prj_id}:{tbl_ds_id}.{tbl_tbl_id}")
 
                         if tbl_metadata:
@@ -265,7 +280,7 @@ def build_bq_metadata(joins_dic):
                                              'experimental_strategy']:
                                         label_key = k
                                     else:
-                                        for f in ['program', 'data_type', 'reference_genome', 'source']:
+                                        for f in ['program', 'data_type', 'reference_genome', 'source', 'species']:
                                             if k.startswith(f):
                                                 label_key = f
                                     if label_key:
@@ -294,7 +309,8 @@ def build_bq_metadata(joins_dic):
         for tbl in bqs_tables_config:
             load_metadata_tables(tbl, bqs_tables_config[tbl]['schema'], bqs_tables_config[tbl]['data'])
     except Exception as e:
-        print(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
+        logger.error(f"[ERROR] Error has occurred while running build_bq_metadata(): {e}")
+        logger.exception(e)
     return list(bq_table_metadata_dict.values()), bq_versions_dict
 
 
@@ -349,10 +365,10 @@ def build_filters(metadata_list):
 
 
 def update_example_joins_json(joins_csv_blob):
-    print('[INFO] Running update_example_joins_json...')
+    logger.info('[STATUS] Running update_example_joins_json...')
     try:
         joins_csv_string = joins_csv_blob.download_as_text()
-        print('[INFO] Reading Example Joins CSV file as text');
+        logger.info('[STATUS] Reading Example Joins CSV file as text');
         reader = csv.reader(joins_csv_string.split("\r\n"), delimiter=',', quotechar='"')
         joins = {}
         cnt = 0
@@ -388,11 +404,12 @@ def update_example_joins_json(joins_csv_blob):
         joins_arr = []
         for key, value in joins.items():
             joins_arr.append(value)
-        print(f'[INFO] Processed {cnt} rows of joins data from file ...')
+        logger.info(f'[STATUS] Processed {cnt} rows of joins data from file')
         return joins_arr
 
     except Exception as e:
-        print(f"[ERROR] Function <update_example_joins_json> failed to run: {e}")
+        logger.error(f"[ERROR] Function <update_example_joins_json> failed to run: {e}")
+        logger.exception(e)
 
 
 def check_for_update(last_updated):
@@ -402,17 +419,17 @@ def check_for_update(last_updated):
         for project_name in project_name_list:
             if update_needed:
                 break
-            print(f'[INFO] Checking for updates from project <{project_name}> ...')
-            client = bigquery.Client(project=project_name)
+            logger.info(f'[STATUS] Checking for updates from project <{project_name}> ...')
+            bq_client = bigquery.Client(project=project_name)
 
-            # dataset_list = client.list_datasets()
-            dataset_list = client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
+            # dataset_list = bq_client.list_datasets()
+            dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
 
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
             for dataset in dataset_list:
                 if update_needed:
                     break
-                # print(f'[INFO] Scanning from === dataset <{dataset.dataset_id}> ...')
+                # logger.info(f'[STATUS] Scanning from === dataset <{dataset.dataset_id}> ...')
                 read_this_dataset = False
                 if dataset.dataset_id.startswith('bq_log') or dataset.dataset_id.startswith('bq_metrics'):
                     continue
@@ -420,48 +437,49 @@ def check_for_update(last_updated):
                     read_this_dataset = True
                 else:
                     # check if dataset is public
-                    ds_access_entries = client.get_dataset(dataset.dataset_id).access_entries
+                    ds_access_entries = bq_client.get_dataset(dataset.dataset_id).access_entries
                     for access_entry in ds_access_entries:
                         if access_entry.role == 'READER' and access_entry.entity_type == 'specialGroup' and access_entry.entity_id == 'allAuthenticatedUsers':
                             read_this_dataset = True
                             break
-                # print(f'read_this_dataset: {read_this_dataset}')
                 if read_this_dataset:
-                    table_list = list(client.list_tables(dataset.dataset_id))
+                    table_list = list(bq_client.list_tables(dataset.dataset_id))
                     for tbl in table_list:
-                        t = client.get_table(tbl)
+                        t = bq_client.get_table(tbl)
                         if last_updated < t.modified:
                             update_needed = True
-                            print(
-                                f'[INFO] Need to update METADATA FILE: Table {t.table_id} was recently added/modified.')
+                            logger.info(
+                                f'[STATUS] Need to update METADATA FILE: Table {t.table_id} was recently added/modified.')
                             break
 
     except Exception as e:
-        print(f"[ERROR] Error has occurred while running check_for_update(): {e}")
+        logger.error(f"[ERROR] Error has occurred while running check_for_update(): {e}")
+        logger.exception(e)
     return update_needed
 
 
 def load_metadata_tables(table_name, schema, data):
     # Construct a BigQuery client object.
     try:
-        client = bigquery.Client()
+        bq_client = bigquery.Client()
         bq_table = bigquery.Table(f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}', schema=schema)
-        client.delete_table(table=bq_table, not_found_ok=True)
-        print(
-            "Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        bq_client.delete_table(table=bq_table, not_found_ok=True)
+        logger.info(
+            "[STATUS] Deleted table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
-        bq_table = client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
-        print(
-            "Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        bq_table = bq_client.create_table(table=bq_table, exists_ok=True)  # Make an API request.
+        logger.info(
+            "[STATUS] Created table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
 
         df = pd.DataFrame(data)
         # Load data to BQ
-        bigquery_job = client.load_table_from_dataframe(df,
+        bigquery_job = bq_client.load_table_from_dataframe(df,
                                                         f'{METADATA_TABLE_PROJECT_ID}.{METADATA_TABLE_DATASET_ID}.{table_name}')
         bigquery_job.result()
-        print(
-            "Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
+        logger.info(
+            "[STATUS] Loaded table {}.{}.{}".format(bq_table.project, bq_table.dataset_id, bq_table.table_id)
         )
     except Exception as e:
-        print(f"[ERROR] Error has occurred while running load_metadata_tables(): {e}")
+        logger.error(f"[ERROR] Error has occurred while running load_metadata_tables(): {e}")
+        logger.exception(e)

@@ -198,9 +198,8 @@ def build_bq_metadata(joins_dic):
             logger.info(f'[STATUS] Building BQ Metadata: Scanning from project [{project_name}] ...')
             bq_client = bigquery.Client(project=project_name)
             dataset_list = bq_client.list_datasets(filter=('labels.bq_eco_scan' if BQ_ECO_SCAN_LABELS_ONLY else None))
-            logger.info(f'[STATUS] Dataset list for {project_name}: {dataset_list}')
+            logger.info(f'[STATUS] Dataset list for {project_name}: {[x.dataset_id for x in dataset_list]}')
             read_public_only = getenv('READ_PUBLIC_ONLY', 'True') == 'True'
-            dataset_proc = []
             for dataset in dataset_list:
                 read_this_dataset = False
                 dataset_tables = []
@@ -218,6 +217,7 @@ def build_bq_metadata(joins_dic):
                             break
                 if read_this_dataset:
                     table_list = list(bq_client.list_tables(dataset.dataset_id))
+                    logger.info(f'[STATUS] Table list for {dataset.dataset_id}: {[x.table_id for x in table_list]}')
                     for tbl in table_list:
                         dataset_tables.append(tbl.table_id)
                         tbl_metadata = bq_client.get_table(tbl).to_api_repr()
@@ -303,7 +303,6 @@ def build_bq_metadata(joins_dic):
                             if k in tbl_metadata:
                                 del tbl_metadata[k]
                         bq_table_metadata_dict[tbl_metadata['id']] = tbl_metadata
-                dataset_proc.append({dataset.dataset_id: {"read": read_this_dataset, "tables": dataset_tables}})
         bq_field_map = {
             'usefulJoins': joins_dic,
             'markedTables': marked_tbl_map,
@@ -410,7 +409,7 @@ def update_example_joins_json(joins_csv_blob):
         joins_arr = []
         for key, value in joins.items():
             joins_arr.append(value)
-        logger.info(f'[STATUS] Processed {cnt} rows of joins data from file ...')
+        logger.info(f'[STATUS] Processed {cnt} rows of joins data from file')
         return joins_arr
 
     except Exception as e:

@@ -214,7 +214,6 @@ def build_bq_metadata(joins_dic):
                             break
                 if read_this_dataset:
                     table_list = list(bq_client.list_tables(dataset.dataset_id))
-                    logger.info(f'[STATUS] Table list for {dataset.dataset_id}: {[x.table_id for x in table_list]}')
                     for tbl in table_list:
                         tbl_metadata = bq_client.get_table(tbl).to_api_repr()
                         if BQ_BUILD_VERSION_JSON and tbl_metadata and 'labels' in tbl_metadata and 'version' in \

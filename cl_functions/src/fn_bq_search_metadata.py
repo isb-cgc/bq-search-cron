@@ -284,7 +284,7 @@ def build_bq_metadata(joins_dic):
                                         for f in ['program', 'data_type', 'reference_genome', 'source', 'species']:
                                             if k.startswith(f):
                                                 label_key = f
-                                    logger.debug(f"[STATUS] Debugging labels: {label_key}, {bqs_tables_config['BQS_LABELS']['data']['labelValue']}")
+                                    logger.info(f"[STATUS] Debugging labels: {label_key}, {bqs_tables_config['BQS_LABELS']['data']['labelValue']}")
                                     if label_key:
                                         bqs_tables_config['BQS_LABELS']['data']['id'].append(tbl_metadata['id'])
                                         bqs_tables_config['BQS_LABELS']['data']['labelKey'].append(label_key)

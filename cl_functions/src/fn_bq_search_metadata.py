@@ -275,16 +275,15 @@ def build_bq_metadata(joins_dic):
                                 tbl_metadata['description'] if 'description' in tbl_metadata else '')
                             bqs_tables_config['BQS_TABLE_REFS']['data']['metadata'].append(tbl_metadata)
                             if 'labels' in tbl_metadata:
-                                label_key = None
                                 for k in tbl_metadata['labels']:
-                                    if k in ['version', 'status', 'access', 'category',
-                                             'experimental_strategy']:
+                                    label_key = None
+                                    if k in ['version','status','access','category','experimental_strategy']:
                                         label_key = k
                                     else:
                                         for f in ['program', 'data_type', 'reference_genome', 'source', 'species']:
                                             if k.startswith(f):
                                                 label_key = f
-                                    logger.info(f"[STATUS] Debugging labels: {label_key}, {bqs_tables_config['BQS_LABELS']['data']['labelValue']}")
+                                    logger.info(f"[STATUS] Debugging labels: {label_key}, {tbl_metadata['labels'][k]}")
                                     if label_key:
                                         bqs_tables_config['BQS_LABELS']['data']['id'].append(tbl_metadata['id'])
                                         bqs_tables_config['BQS_LABELS']['data']['labelKey'].append(label_key)

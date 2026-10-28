@@ -276,8 +276,8 @@ def build_bq_metadata(joins_dic):
                             bqs_tables_config['BQS_TABLE_REFS']['data']['metadata'].append(tbl_metadata)
                             if 'labels' in tbl_metadata:
                                 for k in tbl_metadata['labels']:
-                                    if k in ['version', 'status', 'access', 'category',
-                                             'experimental_strategy']:
+                                    label_key = None
+                                    if k in ['version','status','access','category','experimental_strategy']:
                                         label_key = k
                                     else:
                                         for f in ['program', 'data_type', 'reference_genome', 'source', 'species']:
